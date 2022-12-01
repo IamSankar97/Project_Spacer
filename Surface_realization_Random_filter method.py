@@ -7,7 +7,6 @@ np.random.seed(0)
 
 
 def fit_random_filter_surface(slippy_s: S, grid_spacing: float):
-
     r""" Fits filter to generat random surface
 
 
@@ -31,7 +30,6 @@ def fit_random_filter_surface(slippy_s: S, grid_spacing: float):
 
 
 def generate_surface(lin_trans_surface, length: float, grid_spacing: float, grid_details: bool = False):
-
     no_of_grid_points = int(np.round(length / grid_spacing))
     my_realisation = lin_trans_surface.discretise([no_of_grid_points, no_of_grid_points], periodic=True,
                                                   create_new=True)
@@ -44,7 +42,6 @@ def generate_surface(lin_trans_surface, length: float, grid_spacing: float, grid
 
 
 def compare_acf(lin_trans_surface, my_realisation, address: str):
-
     target = lin_trans_surface.target_acf_array
     my_realisation.get_acf()
     actual = np.array(my_realisation.acf)
@@ -74,8 +71,7 @@ def get_properties(slippy_surface):
         print(n, r)
 
 
-def main():
-
+def main(address: str, reduce_resolution_by: int = 1, compare: bool = False):
     # A spacer ring separates the magnetic area inside of a hard disk. This research mainly
     # focuses on the titanium alloy material for defect detection. Its appearance size is 32.6mm in Outer diameter 25mm
     # in Inner diameter and 4 mm in surface width and 1.7 mm in thickness.
@@ -83,8 +79,8 @@ def main():
     path = '/home/mohanty/PycharmProjects/Digital-twin-for-hard-disk-spacer-ring-defect-detection' \
            '/Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
     grid_spacing = 3.697  # Original grid_spacing
-    spacer_outer_dia = (32.6 + 1.4) * 1000  # mm to micrometer *1000, adding buffer of 1.4 mm
-    reduce_resolution_by = 10
+    spacer_outer_dia = (32.6 + grid_spacing * 4) * 1000  # mm to micrometer *1000, adding buffer of 1.4 mm
+
     surf_height = pd.read_csv(path, delimiter=',')
     surf_height.fillna(surf_height.mean(), inplace=True)  # Filling few empty cells with mean
     slippy_s = S.assurface(surf_height)  # Creating Slippy surface object
@@ -96,14 +92,15 @@ def main():
 
     my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
 
-    compare_acf(lin_trans_surface_original, my_realisation, 'my_plot_X1_dx3.69to{}.png'
-                                                            .format(np.round(desired_grid_spacing),2))
+    if compare:
+        compare_acf(lin_trans_surface_original, my_realisation, 'my_plot_X1_dx3.69to{}.png'
+                    .format(np.round(desired_grid_spacing), 2))
 
-    print("\nProperties: Target\n")
-    get_properties(slippy_s)
+        print("\nProperties: Target\n")
+        get_properties(slippy_s)
 
-    print("\nProperties: actual\n")
-    get_properties(my_realisation)
+        print("\nProperties: actual\n")
+        get_properties(my_realisation)
 
     # Method to add grid spacing information
     realisation = pd.DataFrame(my_realisation.profile)
@@ -112,10 +109,10 @@ def main():
     realisation.sort_index(inplace=True)
     realisation[0][0] = my_realisation.grid_spacing
 
-    np.savetxt("points_X{multi}_dx{dx}.csv".format(multi=reduce_resolution_by,
+    np.savetxt(address+"points_X{multi}_dx{dx}.csv".format(multi=reduce_resolution_by,
                                                    dx=np.round(my_realisation.grid_spacing, 3)),
                np.array(realisation), delimiter=',')
 
 
 if __name__ == "__main__":
-    main()
+    main("/home/mohanty/PycharmProjects/Blender_Debug/topology/", 2)
