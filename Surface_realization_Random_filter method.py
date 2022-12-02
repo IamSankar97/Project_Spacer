@@ -79,7 +79,7 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False):
     path = '/home/mohanty/PycharmProjects/Digital-twin-for-hard-disk-spacer-ring-defect-detection' \
            '/Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
     grid_spacing = 3.697  # Original grid_spacing
-    spacer_outer_dia = (32.6 + grid_spacing * 4) * 1000  # mm to micrometer *1000, adding buffer of 1.4 mm
+
 
     surf_height = pd.read_csv(path, delimiter=',')
     surf_height.fillna(surf_height.mean(), inplace=True)  # Filling few empty cells with mean
@@ -90,29 +90,33 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False):
     lin_trans_surface_original = fit_random_filter_surface(slippy_s, grid_spacing)
     lin_trans_surface_realised = fit_random_filter_surface(slippy_s, desired_grid_spacing)
 
-    my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
+    spacer_outer_dia = (32.6 + desired_grid_spacing * 2) * 1000  # mm to micrometer *1000
 
-    if compare:
-        compare_acf(lin_trans_surface_original, my_realisation, 'my_plot_X1_dx3.69to{}.png'
-                    .format(np.round(desired_grid_spacing), 2))
+    for i in range(0, 20):
+        my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
 
-        print("\nProperties: Target\n")
-        get_properties(slippy_s)
+        if compare:
+            compare_acf(lin_trans_surface_original, my_realisation, 'my_plot_X1_dx3.69to{}.png'
+                        .format(np.round(desired_grid_spacing), 2))
 
-        print("\nProperties: actual\n")
-        get_properties(my_realisation)
+            print("\nProperties: Target\n")
+            get_properties(slippy_s)
 
-    # Method to add grid spacing information
-    realisation = pd.DataFrame(my_realisation.profile)
-    realisation.loc[-1] = 0
-    realisation.index = realisation.index + 1  # shifting index
-    realisation.sort_index(inplace=True)
-    realisation[0][0] = my_realisation.grid_spacing
+            print("\nProperties: actual\n")
+            get_properties(my_realisation)
 
-    np.savetxt(address+"points_X{multi}_dx{dx}.csv".format(multi=reduce_resolution_by,
-                                                   dx=np.round(my_realisation.grid_spacing, 3)),
-               np.array(realisation), delimiter=',')
+        # Method to add grid spacing information
+        realisation = pd.DataFrame(my_realisation.profile)
+        realisation.loc[-1] = 0
+        realisation.index = realisation.index + 1  # shifting index
+        realisation.sort_index(inplace=True)
+        realisation[0][0] = my_realisation.grid_spacing
+
+        np.savetxt(address + "points_X{multi}_dx{dx}_{index}.csv".format(multi=reduce_resolution_by,
+                                                                         dx=np.round(my_realisation.grid_spacing, 3),
+                                                                         index=i),
+                   np.array(realisation), delimiter=',')
 
 
 if __name__ == "__main__":
-    main("/home/mohanty/PycharmProjects/Blender_Debug/topology/", 2)
+    main("/home/mohanty/PycharmProjects/Blender_Debug/topology/3/", 5)
