@@ -62,6 +62,23 @@ def compare_acf(lin_trans_surface, my_realisation, address: str):
     axes[3].legend();
     axes[3].set_title('Comparison along x direction')
     plt.savefig(address)
+    plt.cla()
+    plt.clf()
+
+
+def compare_height(lin_trans_surface_original, lin_trans_surface_realised, address: str):
+    my_surface_o = lin_trans_surface_original.discretise([2048, 2048], create_new=True)
+    my_surface_r = lin_trans_surface_realised.discretise([2048, 2048], create_new=True)
+
+    fig, axes = my_surface_o.show(['profile', 'psd', 'histogram'], ['image', 'image'], figsize=(15, 5))
+    fig.suptitle('Target_3.6', fontsize=16)
+    plt.savefig(address+"_target.png")
+    plt.clf()
+
+    fig, axes = my_surface_r.show(['profile', 'psd', 'histogram'], ['image', 'image'], figsize=(15, 5))
+    fig.suptitle('Actual_'+address.split('to')[1], fontsize=16)
+    plt.savefig(address + "_actual.png")
+    plt.clf()
 
 
 def get_properties(slippy_surface):
@@ -71,15 +88,15 @@ def get_properties(slippy_surface):
         print(n, r)
 
 
-def main(address: str, reduce_resolution_by: int = 1, compare: bool = False):
+def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, height_compare: bool = False):
     # A spacer ring separates the magnetic area inside of a hard disk. This research mainly
     # focuses on the titanium alloy material for defect detection. Its appearance size is 32.6mm in Outer diameter 25mm
     # in Inner diameter and 4 mm in surface width and 1.7 mm in thickness.
 
     path = '/home/mohanty/PycharmProjects/Digital-twin-for-hard-disk-spacer-ring-defect-detection' \
            '/Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
+    address = address+"{}/".format(reduce_resolution_by)
     grid_spacing = 3.697  # Original grid_spacing
-
 
     surf_height = pd.read_csv(path, delimiter=',')
     surf_height.fillna(surf_height.mean(), inplace=True)  # Filling few empty cells with mean
@@ -92,18 +109,22 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False):
 
     spacer_outer_dia = (32.6 + desired_grid_spacing * 2) * 1000  # mm to micrometer *1000
 
-    for i in range(0, 20):
+    for i in range(0, 1):
         my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
 
         if compare:
             compare_acf(lin_trans_surface_original, my_realisation, 'my_plot_X1_dx3.69to{}.png'
-                        .format(np.round(desired_grid_spacing), 2))
+                        .format(np.round(desired_grid_spacing), 5))
 
             print("\nProperties: Target\n")
             get_properties(slippy_s)
 
             print("\nProperties: actual\n")
             get_properties(my_realisation)
+
+        if height_compare:
+            compare_height(lin_trans_surface_original, lin_trans_surface_realised, 'my_height_plot_X1_dx3.69to{}'
+                        .format(np.round(desired_grid_spacing), 2))
 
         # Method to add grid spacing information
         realisation = pd.DataFrame(my_realisation.profile)
@@ -119,4 +140,4 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False):
 
 
 if __name__ == "__main__":
-    main("/home/mohanty/PycharmProjects/Blender_Debug/topology/3/", 5)
+    main("/home/mohanty/PycharmProjects/Blender_Debug/topology/", 10, compare=True, height_compare=True)
