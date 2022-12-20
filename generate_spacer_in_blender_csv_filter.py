@@ -264,6 +264,11 @@ def radial_2d(surface_height_topology, PixelWidth):
 
 
 def get_vertices(my_realisation: np.ndarray):
+    """
+    :param my_realisation: topology realized from Random surface method
+    :return:
+    """
+    my_realisation = my_realisation * 1e-6  # Convert t0 meter
     grid_spacing = my_realisation[0][0]
     surface = np.array(my_realisation[1:, :])
 
@@ -279,6 +284,7 @@ def get_vertices(my_realisation: np.ndarray):
 
     #   Read and sort the vertices coordinates (sort by x and y)
     vertices = sorted([(float(r[0]), float(r[1]), float(r[4])) for r in point_coords], key=itemgetter(0, 1))
+
     return vertices, point_coords
 
 
@@ -326,6 +332,7 @@ def update_mesh(new_realisation: np.ndarray, existing_mesh):
 
     bm.to_mesh(existing_mesh.data)  # Finish up, write the bmesh back to the mesh
     bm.free()
+    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)     # Updates the mesh in scene by refreshing the screen
 
 
 def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perform_boolean: bool = False):
@@ -340,7 +347,7 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     bpy.context.scene.unit_settings.length_unit = 'METERS'
 
-    my_realisation = np.genfromtxt(address, delimiter=',') * 1e-6  # Convert t0 meter
+    my_realisation = np.genfromtxt(address, delimiter=',')
 
     vertices, point_coord = get_vertices(my_realisation)
 
@@ -359,10 +366,10 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
     for i in range(0, 5):
         start_time = time.time()
 
-        my_realisation_new = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',') * 1e-3
+        my_realisation_new = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',')
 
         update_mesh(my_realisation_new, spacer_surf)
-        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+        print("updated {}".format(i))
 
     print("--- %s seconds ---" % (time.time() - start_time))
 
