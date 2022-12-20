@@ -1,11 +1,11 @@
-import pydevd_pycharm
-pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+# import pydevd_pycharm
+# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import bmesh
 import bpy
 from operator import itemgetter
 import time
-import os as S # Slippy to be replaced here
+import os as S  # Slippy to be replaced here
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -14,7 +14,6 @@ np.random.seed(0)
 
 
 def fit_random_filter_surface(slippy_s: S, desired_grid_spacing: float):
-
     """
 
     :param slippy_s: slippy.surface
@@ -264,17 +263,72 @@ def radial_2d(surface_height_topology, PixelWidth):
     return {'C': C, "q": q, "Cq": Cq, "qx": qx, "qy": qy, "z_win": z_win}
 
 
-def get_vertices(Xmesh: np.ndarray, Ymesh: np.ndarray, surface: np.ndarray):
+def get_vertices(my_realisation: np.ndarray):
+    grid_spacing = my_realisation[0][0]
+    surface = np.array(my_realisation[1:, :])
 
-    point_coords = np.array([np.array([a1, b1, c1]) for a, b, c in zip(Xmesh, Ymesh, surface) for a1, b1, c1 in
-                             zip(a, b, c)])
+    end_l, end_r = int(-surface.shape[0] / 2), int(surface.shape[0] / 2)
+
+    X = np.array([i * grid_spacing for i in range(end_l, end_r)])
+    Y = X
+    Xmesh, Ymesh = np.meshgrid(X, Y)
+
+    point_coords = np.array(
+        [np.array([x, y, cart2pol(x, y)[0], cart2pol(x, y)[1], z]) for x_, y_, z_ in zip(Xmesh, Ymesh, surface)
+         for x, y, z in zip(x_, y_, z_)])
 
     #   Read and sort the vertices coordinates (sort by x and y)
-    vertices = sorted([(float(r[0]), float(r[1]), float(r[2])) for r in point_coords], key=itemgetter(0, 1))
-    return vertices
+    vertices = sorted([(float(r[0]), float(r[1]), float(r[4])) for r in point_coords], key=itemgetter(0, 1))
+    return vertices, point_coords
 
 
-def main(address: str, reduce_resolution: int= 1, smoothing: bool = False, perform_boolean: bool = False):
+def generate_polygon(vertices, mesh_name: str = 'my_mesh', smoothing: bool = 0):
+    """
+    :param vertices: sorted list of vertices
+    :param mesh_name: name of the generate mesh(optional)
+    :param smoothing: to smooth the mesh
+    :return: generates polygon mesh in blender
+    """
+    #   ********* Assuming we have a rectangular grid *************
+    xSize = next(i for i in range(len(vertices))
+                 if vertices[i][0] != vertices[i + 1][0]) + 1  # Find the first change in X
+    ySize = len(vertices) // xSize
+
+    #   Generate the polygons (four vertices linked in a face)
+    polygons = [(i, i - 1, i - 1 + xSize, i + xSize) for i in range(1, len(vertices) - xSize) if i % xSize != 0]
+
+    mesh = bpy.data.meshes.new(mesh_name)  # Create the mesh (inner data)
+    obj = bpy.data.objects.new(mesh_name, mesh)  # Create an object
+    obj.data.from_pydata(vertices, [], polygons)  # Associate vertices and polygons
+
+    if smoothing:
+        for p in obj.data.polygons:  # Set smooth shading (if needed)
+            p.use_smooth = True
+
+    bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+
+
+def update_mesh(new_realisation: np.ndarray, existing_mesh):
+    """
+
+    :param new_realisation: a numpy array with new mesh deta
+    :param existing_mesh: existing mesh where the new_realisation data to be updated
+    :return: updates mesh in blender
+    """
+    # Get a BMesh representation
+    bm = bmesh.new()  # create an empty BMesh
+    bm.from_mesh(existing_mesh.data)  # fill it in from a Mesh
+    vertices_new, point_coord_new = get_vertices(new_realisation)
+
+    for vertice_old, vertice_new in zip(bm.verts, vertices_new):
+        vertice_old.co.z = vertice_new[2]  # if vertice_old.co.x == vertice_new[0] and
+        # vertice_old.co.y == vertice_new[1]:
+
+    bm.to_mesh(existing_mesh.data)  # Finish up, write the bmesh back to the mesh
+    bm.free()
+
+
+def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perform_boolean: bool = False):
     # spacer_outer_dia = (32.6 + grid_spacing * 2) * 1000  # mm to micrometer *1000, adding buffer of 1.4 mm
     #
     # lin_trans_surface_realised = random_surf(address, grid_spacing=grid_spacing,
@@ -284,76 +338,35 @@ def main(address: str, reduce_resolution: int= 1, smoothing: bool = False, perfo
     #
     # my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, True)
 
-    my_realisation = np.genfromtxt(address, delimiter=',') *1e-6
-    grid_spacing = my_realisation[0][0]
-    my_realisation = np.array(my_realisation[1:, :])*500
+    bpy.context.scene.unit_settings.length_unit = 'METERS'
 
-    X = np.array([i * grid_spacing for i in range(my_realisation.shape[0])])
-    Y = X
-    x_mesh, y_mesh = np.meshgrid(X, Y)
+    my_realisation = np.genfromtxt(address, delimiter=',') * 1e-6  # Convert t0 meter
 
-    vertices = get_vertices(x_mesh, y_mesh, my_realisation)
-
-    #   ********* Assuming we have a rectangular grid *************
-    xSize = next(
-        i for i in range(len(vertices)) if vertices[i][0] != vertices[i + 1][0]) + 1  # Find the first change in X
-    ySize = len(vertices) // xSize
-
-    #   Generate the polygons (four vertices linked in a face)
-    polygons = [(i, i - 1, i - 1 + xSize, i + xSize) for i in range(1, len(vertices) - xSize) if i % xSize != 0]
+    vertices, point_coord = get_vertices(my_realisation)
 
     csv_file = address.split('/')[-1].split('.')
     name = csv_file[0] + '.' + csv_file[1]
-    mesh = bpy.data.meshes.new(name)  # Create the mesh (inner data)
-    obj = bpy.data.objects.new(name, mesh)  # Create an object
 
-    obj.data.from_pydata(vertices, [], polygons)  # Associate vertices and polygons
-
-    if smoothing:
-        for p in obj.data.polygons:  # Set smooth shading (if needed)
-            p.use_smooth = True
-
-    bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+    generate_polygon(vertices, name)
 
     spacer_surf = bpy.data.objects[name]
     cylinder = bpy.data.objects['Cylinder']
-    cylinder.location.y += spacer_surf.dimensions.y / 2
-    cylinder.location.x += spacer_surf.dimensions.x / 2
 
     bool_intersect(spacer_surf, cylinder)
 
     bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
-    # Get a BMesh representation
 
-    for i in range(0, 1):
-        bm = bmesh.new()  # create an empty BMesh
-        bm.from_mesh(spacer_surf.data)  # fill it in from a Mesh
-
+    for i in range(0, 5):
         start_time = time.time()
 
-        my_realisation = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',')*1e-6
-        my_realisation = np.array(my_realisation[1:, :])
-        vertices_new = get_vertices(x_mesh, y_mesh, my_realisation)
-        count = 0
+        my_realisation_new = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',') * 1e-3
 
-        for vertice_old, vertice_new in zip(bm.verts, vertices_new):
-            count += 1
-
-            vertice_old.co.z = vertice_new[2]   # if vertice_old.co.x == vertice_new[0] and
-                                                # vertice_old.co.y == vertice_new[1]:
-
-            # if count == 5000:
-            #     break
-
-        bm.to_mesh(spacer_surf.data)    # Finish up, write the bmesh back to the mesh
-        bm.free()
-        # bool_intersect(spacer_surf, cylinder)
-
-    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+        update_mesh(my_realisation_new, spacer_surf)
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
     print("--- %s seconds ---" % (time.time() - start_time))
 
 
 if __name__ == "__main__":
-    path = '/home/mohanty/PycharmProjects/Blender_Debug/topology/points_X100_dx369.7.csv'
+    path = 'topology/points_X100_dx369.7.csv'
     main(path, perform_boolean=True)
