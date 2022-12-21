@@ -1,5 +1,6 @@
-# import pydevd_pycharm
-# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+import pydevd_pycharm
+
+pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import bmesh
 import bpy
@@ -9,6 +10,7 @@ import os as S  # Slippy to be replaced here
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import cmath
 
 np.random.seed(0)
 
@@ -171,6 +173,11 @@ def cart2pol(x, y):
     phi = np.arctan2(y, x)
     return rho, phi
 
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return(x, y)
+
 
 def radial_2d(surface_height_topology, PixelWidth):
     z = surface_height_topology
@@ -263,7 +270,7 @@ def radial_2d(surface_height_topology, PixelWidth):
     return {'C': C, "q": q, "Cq": Cq, "qx": qx, "qy": qy, "z_win": z_win}
 
 
-def get_vertices(my_realisation: np.ndarray):
+def get_point_co(my_realisation: np.ndarray):
     """
     :param my_realisation: topology realized from Random surface method
     :return:
@@ -282,10 +289,14 @@ def get_vertices(my_realisation: np.ndarray):
         [np.array([x, y, cart2pol(x, y)[0], cart2pol(x, y)[1], z]) for x_, y_, z_ in zip(Xmesh, Ymesh, surface)
          for x, y, z in zip(x_, y_, z_)])
 
+    return point_coords
+
+
+def get_vertices(point_coords):
     #   Read and sort the vertices coordinates (sort by x and y)
     vertices = sorted([(float(r[0]), float(r[1]), float(r[4])) for r in point_coords], key=itemgetter(0, 1))
 
-    return vertices, point_coords
+    return vertices
 
 
 def generate_polygon(vertices, mesh_name: str = 'my_mesh', smoothing: bool = 0):
@@ -314,7 +325,7 @@ def generate_polygon(vertices, mesh_name: str = 'my_mesh', smoothing: bool = 0):
     bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
 
 
-def update_mesh(new_realisation: np.ndarray, existing_mesh):
+def update_mesh_back_ground(new_realisation: np.ndarray, existing_mesh):
     """
 
     :param new_realisation: a numpy array with new mesh deta
@@ -324,7 +335,7 @@ def update_mesh(new_realisation: np.ndarray, existing_mesh):
     # Get a BMesh representation
     bm = bmesh.new()  # create an empty BMesh
     bm.from_mesh(existing_mesh.data)  # fill it in from a Mesh
-    vertices_new, point_coord_new = get_vertices(new_realisation)
+    vertices_new = get_vertices(new_realisation)
 
     for vertice_old, vertice_new in zip(bm.verts, vertices_new):
         vertice_old.co.z = vertice_new[2]  # if vertice_old.co.x == vertice_new[0] and
@@ -332,7 +343,91 @@ def update_mesh(new_realisation: np.ndarray, existing_mesh):
 
     bm.to_mesh(existing_mesh.data)  # Finish up, write the bmesh back to the mesh
     bm.free()
-    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)     # Updates the mesh in scene by refreshing the screen
+    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)  # Updates the mesh in scene by refreshing the screen
+
+
+def update_mesh_defect(point_coord: np.ndarray, existing_mesh):
+    """
+
+    :param new_realisation: a numpy array with new mesh deta
+    :param existing_mesh: existing mesh where the new_realisation data to be updated
+    :return: updates mesh in blender
+    """
+    # Get a BMesh representation
+    bm = bmesh.new()  # create an empty BMesh
+    bm.from_mesh(existing_mesh.data)  # fill it in from a Mesh
+    vertices_new = get_vertices(point_coord)
+
+    for vertice_old, vertice_new in zip(bm.verts, vertices_new):
+        vertice_old.co.z = vertice_new[2]  # if vertice_old.co.x == vertice_new[0] and
+        # vertice_old.co.y == vertice_new[1]:
+
+    bm.to_mesh(existing_mesh.data)  # Finish up, write the bmesh back to the mesh
+    bm.free()
+    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)  # Updates the mesh in scene by refreshing the screen
+
+
+def get_theta(r1, r2, theta1, distance):
+
+    if distance < r2-r1:
+        distance = r2-r1
+    theta2 = theta1+np.arccos((r1**2+r2**2-distance**2)/2*r1*r2)
+
+    return theta2
+
+
+def closest_number(arr, target):
+    # Sort the array in ascending order
+    arr.sort()
+
+    # Initialize variables for binary search
+    low = 0
+    high = len(arr) - 1
+
+    # Binary search for target number
+    while low <= high:
+        mid = (low + high) // 2  # Calculate midpoint
+        if arr[mid] == target:  # If target is found, return it
+            return arr[mid]
+        elif arr[mid] < target:  # If midpoint is less than target, search right half of array
+            low = mid + 1
+        else:  # If midpoint is greater than target, search left half of array
+            high = mid - 1
+
+    # If target is not found, return closest number
+    if abs(arr[low] - target) < abs(arr[high] - target):
+        return arr[low]
+    else:
+        return arr[high]
+
+
+def generate_defect(point_coord: np.ndarray, grid_spacing, alpha=0.0, beta=0.0, scratch_length: float = 0.0):
+    r_outer, r_inner = 32.6 * 1000 * 0.5, 25 * 1000 * 0.5
+    h_up, h_defect = grid_spacing / np.tan(alpha), -(grid_spacing / np.tan(beta))
+
+    r0, theta0 = r_inner, 10
+    r1 = r_inner+(10*grid_spacing)
+
+    theta1 = get_theta(r0, r1, theta0, scratch_length)
+    x0, y0 = pol2cart(r0, theta0)
+    x1, y1 = pol2cart(r1, theta1)
+    scratch_height = y1-y0
+    no_of_grids = int(scratch_height/grid_spacing)
+    slope_scratch = np.arcsin(scratch_height, scratch_length)
+
+    y_scratch = np.array([y0 + (i*grid_spacing) for i in range(no_of_grids)])
+    x_scratch = [np.tan(slope_scratch)/y_co for y_co in y_scratch]
+
+    x_scratch_actual = [closest_number(x_co, point_coord[0]) for x_co in x_scratch]
+
+    for x_sc_co, y_sc_co in zip(x_scratch, y_scratch):
+       for x_co, y_co in zip(point_coord[0], [1]):
+           if x_co == x_sc_co and y_co == y_sc_co:
+               point_coord[4][point_coord[0].index(x_co)] -= h_defect
+
+    x_scratch_left, x_scratch_right = x_scratch_actual - grid_spacing, x_scratch_actual + grid_spacing
+
+    return point_coord
 
 
 def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perform_boolean: bool = False):
@@ -349,7 +444,9 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     my_realisation = np.genfromtxt(address, delimiter=',')
 
-    vertices, point_coord = get_vertices(my_realisation)
+    point_coord = get_point_co(my_realisation)
+
+    vertices = get_vertices(point_coord)
 
     csv_file = address.split('/')[-1].split('.')
     name = csv_file[0] + '.' + csv_file[1]
@@ -368,10 +465,9 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
         my_realisation_new = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',')
 
-        update_mesh(my_realisation_new, spacer_surf)
-        print("updated {}".format(i))
+        update_mesh_back_ground(my_realisation_new, spacer_surf)
 
-    print("--- %s seconds ---" % (time.time() - start_time))
+        print("--- %s seconds ---" % (time.time() - start_time))
 
 
 if __name__ == "__main__":
