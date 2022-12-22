@@ -1,6 +1,5 @@
-import pydevd_pycharm
-
-pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+# import pydevd_pycharm
+# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import bmesh
 import bpy
@@ -173,10 +172,16 @@ def cart2pol(x, y):
     phi = np.arctan2(y, x)
     return rho, phi
 
+
 def pol2cart(rho, phi):
+    """
+    :param rho: Radius in micrometer
+    :param phi: degree in radians
+    :return:
+    """
     x = rho * np.cos(phi)
     y = rho * np.sin(phi)
-    return(x, y)
+    return (x, y)
 
 
 def radial_2d(surface_height_topology, PixelWidth):
@@ -286,15 +291,15 @@ def get_point_co(my_realisation: np.ndarray):
     Xmesh, Ymesh = np.meshgrid(X, Y)
 
     point_coords = np.array(
-        [np.array([x, y, cart2pol(x, y)[0], cart2pol(x, y)[1], z]) for x_, y_, z_ in zip(Xmesh, Ymesh, surface)
+        [np.array([x, y, z]) for x_, y_, z_ in zip(Xmesh, Ymesh, surface)
          for x, y, z in zip(x_, y_, z_)])
 
-    return point_coords
+    return point_coords, grid_spacing
 
 
 def get_vertices(point_coords):
     #   Read and sort the vertices coordinates (sort by x and y)
-    vertices = sorted([(float(r[0]), float(r[1]), float(r[4])) for r in point_coords], key=itemgetter(0, 1))
+    vertices = sorted([(float(r[0]), float(r[1]), float(r[2])) for r in point_coords], key=itemgetter(0, 1))
 
     return vertices
 
@@ -349,7 +354,7 @@ def update_mesh_back_ground(new_realisation: np.ndarray, existing_mesh):
 def update_mesh_defect(point_coord: np.ndarray, existing_mesh):
     """
 
-    :param new_realisation: a numpy array with new mesh deta
+    :param point_coord: a numpy array with point_coords with generated defect
     :param existing_mesh: existing mesh where the new_realisation data to be updated
     :return: updates mesh in blender
     """
@@ -368,15 +373,13 @@ def update_mesh_defect(point_coord: np.ndarray, existing_mesh):
 
 
 def get_theta(r1, r2, theta1, distance):
-
     if distance < r2-r1:
         distance = r2-r1
-    theta2 = theta1+np.arccos((r1**2+r2**2-distance**2)/2*r1*r2)
-
+    theta2 = np.arccos((r1**2+(r2**2)-(distance**2))/(2*r1*r2)) + np.radians(theta1)
     return theta2
 
 
-def closest_number(arr, target):
+def closest_number(target, arr):
     # Sort the array in ascending order
     arr.sort()
 
@@ -390,7 +393,11 @@ def closest_number(arr, target):
         if arr[mid] == target:  # If target is found, return it
             return arr[mid]
         elif arr[mid] < target:  # If midpoint is less than target, search right half of array
-            low = mid + 1
+            if low == high:
+                low -=1
+                break
+            else:
+                low = mid + 1
         else:  # If midpoint is greater than target, search left half of array
             high = mid - 1
 
@@ -401,33 +408,45 @@ def closest_number(arr, target):
         return arr[high]
 
 
-def generate_defect(point_coord: np.ndarray, grid_spacing, alpha=0.0, beta=0.0, scratch_length: float = 0.0):
-    r_outer, r_inner = 32.6 * 1000 * 0.5, 25 * 1000 * 0.5
-    h_up, h_defect = grid_spacing / np.tan(alpha), -(grid_spacing / np.tan(beta))
+def generate_defect(point_coo: np.ndarray, grid_spacing, alpha=0.0, beta=0.0, scratch_length: float = 0.0):
+    # Units in meter
 
-    r0, theta0 = r_inner, 10
-    r1 = r_inner+(10*grid_spacing)
+    r_outer, r_inner, scratch_length = 32.6 * 0.5 * 1e-3, 25 * 0.5 * 1e-3, scratch_length*1e-3
+    h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), grid_spacing / np.tan(np.radians(beta))
+    h_defect = h_total-h_up
+    r0, theta0 = r_inner, 0
+    r1 = r_inner + 0.7*scratch_length
 
     theta1 = get_theta(r0, r1, theta0, scratch_length)
     x0, y0 = pol2cart(r0, theta0)
+    x0, y0 = closest_number(x0, point_coo[:, 0].copy()), closest_number(y0, point_coo[:, 1].copy())
     x1, y1 = pol2cart(r1, theta1)
-    scratch_height = y1-y0
-    no_of_grids = int(scratch_height/grid_spacing)
-    slope_scratch = np.arcsin(scratch_height, scratch_length)
+    scratch_height = y1 - y0
+    no_of_grids = int(scratch_height / grid_spacing)
+    slope_scratch = np.arcsin(scratch_height/scratch_length)
 
-    y_scratch = np.array([y0 + (i*grid_spacing) for i in range(no_of_grids)])
-    x_scratch = [np.tan(slope_scratch)/y_co for y_co in y_scratch]
+    y_scratch = np.array([y0 + (i * grid_spacing) for i in range(no_of_grids)])
+    x_scratch = [y_co/(np.tan(slope_scratch)) for y_co in y_scratch]
+    x_scratch = x_scratch+x0
 
-    x_scratch_actual = [closest_number(x_co, point_coord[0]) for x_co in x_scratch]
+    df = pd.DataFrame(point_coo, dtype= np.float64)
+    for y_sc_co, x_sc_co in zip(y_scratch, x_scratch):
+        df_ = df[df.loc[:,1]==y_sc_co]        #point_coo[point_coo[:,1]==y_sc_co]
+        x_sc_co_actual = closest_number(x_sc_co, np.array(df_[0]))
+        for row in df_.itertuples():
+            # Check if the combination is in the current row
+            if x_sc_co_actual in row and y_sc_co in row:
+                # If the combination is found, print a message and break out of the loop
+                print("Combination found in row:", row)
+                point_coo[row[0],2] = -h_defect  # to move the row down
+                break
+            # If the loop completes without finding the combination, print a message
+            else:
+                print("Combination not found in array")
 
-    for x_sc_co, y_sc_co in zip(x_scratch, y_scratch):
-       for x_co, y_co in zip(point_coord[0], [1]):
-           if x_co == x_sc_co and y_co == y_sc_co:
-               point_coord[4][point_coord[0].index(x_co)] -= h_defect
+    # x_scratch_left, x_scratch_right = x_scratch_actual - grid_spacing, x_scratch_actual + grid_spacing
 
-    x_scratch_left, x_scratch_right = x_scratch_actual - grid_spacing, x_scratch_actual + grid_spacing
-
-    return point_coord
+    return point_coo
 
 
 def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perform_boolean: bool = False):
@@ -444,7 +463,9 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     my_realisation = np.genfromtxt(address, delimiter=',')
 
-    point_coord = get_point_co(my_realisation)
+    point_coord, grid_spacing = get_point_co(my_realisation)
+
+    point_coord = generate_defect(point_coord, grid_spacing, 70, 40, 5)
 
     vertices = get_vertices(point_coord)
 
@@ -471,5 +492,5 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X100_dx369.7.csv'
+    path = 'topology/points_X10_dx36.97.csv'
     main(path, perform_boolean=True)
