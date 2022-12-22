@@ -9,6 +9,7 @@ import os as S  # Slippy to be replaced here
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import warnings
 import cmath
 
 np.random.seed(0)
@@ -375,6 +376,7 @@ def update_mesh_defect(point_coord: np.ndarray, existing_mesh):
 def get_theta(r1, r2, theta1, distance):
     if distance < r2-r1:
         distance = r2-r1
+        warnings.warn("defect length is smaller than asked radius boundary, considered distance = r2-r1")
     theta2 = np.arccos((r1**2+(r2**2)-(distance**2))/(2*r1*r2)) + np.radians(theta1)
     return theta2
 
@@ -408,14 +410,31 @@ def closest_number(target, arr):
         return arr[high]
 
 
-def generate_defect(point_coo: np.ndarray, grid_spacing, alpha=0.0, beta=0.0, scratch_length: float = 0.0):
-    # Units in meter
+def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=0.0,
+                    beta=0.0, scratch_length: float = 0.0):
+    """
+    Note:
+        It takes starting point of defect (r0, theta0), end point of defect r1 (calculates theta2) and defect length to prescribe
+        the defect location
 
-    r_outer, r_inner, scratch_length = 32.6 * 0.5 * 1e-3, 25 * 0.5 * 1e-3, scratch_length*1e-3
+
+    :param point_coo: a numpy array with a list of (x, y, z)  list of elements in Meters
+    :param grid_spacing: distance between two consugative points in Meters
+    :param r0: starting radius of defect in mm
+    :param r1: end radius of defect in mm
+    :param theta0: starting angle of defect in degree
+    :param alpha:
+    :param beta:
+    :param scratch_length: length of the scratch in mm
+    :return: Generates defect in the spacer
+    """
+
+    # Convert to meter
+    r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
     h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), grid_spacing / np.tan(np.radians(beta))
     h_defect = h_total-h_up
-    r0, theta0 = r_inner, 0
-    r1 = r_inner + 0.7*scratch_length
+    # r0, theta0 = r_inner, 0
+    # r1 = r_inner + 0.7*scratch_length
 
     theta1 = get_theta(r0, r1, theta0, scratch_length)
     x0, y0 = pol2cart(r0, theta0)
@@ -465,7 +484,8 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     point_coord, grid_spacing = get_point_co(my_realisation)
 
-    point_coord = generate_defect(point_coord, grid_spacing, 70, 40, 5)
+    # Error while updating theta0, anything without results in error, need to fix this.
+    point_coord = generate_defect(point_coord, grid_spacing, 14, 15 , 0 , 70, 40, 7)
 
     vertices = get_vertices(point_coord)
 
@@ -481,16 +501,16 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
-    for i in range(0, 5):
-        start_time = time.time()
-
-        my_realisation_new = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',')
-
-        update_mesh_back_ground(my_realisation_new, spacer_surf)
-
-        print("--- %s seconds ---" % (time.time() - start_time))
+    # for i in range(0, 5):
+    #     start_time = time.time()
+    #
+    #     my_realisation_new = np.genfromtxt('topology/points_X100_dx369.7_{}.csv'.format(i), delimiter=',')
+    #
+    #     update_mesh_back_ground(my_realisation_new, spacer_surf)
+    #
+    #     print("--- %s seconds ---" % (time.time() - start_time))
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X10_dx36.97.csv'
+    path = 'topology/points_X100_dx369.7.csv'
     main(path, perform_boolean=True)
