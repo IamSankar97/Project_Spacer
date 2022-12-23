@@ -1,5 +1,5 @@
-# import pydevd_pycharm
-# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+import pydevd_pycharm
+pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import bmesh
 import bpy
@@ -169,6 +169,12 @@ def generate_topology(list_vertices):
 
 
 def cart2pol(x, y):
+    """
+
+    :param x: micrometers
+    :param y: micrometers
+    :return: rho in micrometer phi in radian
+    """
     rho = np.sqrt(x ** 2 + y ** 2)
     phi = np.arctan2(y, x)
     return rho, phi
@@ -178,7 +184,7 @@ def pol2cart(rho, phi):
     """
     :param rho: Radius in micrometer
     :param phi: degree in radians
-    :return:
+    :return: x, y in micrometer
     """
     x = rho * np.cos(phi)
     y = rho * np.sin(phi)
@@ -428,7 +434,11 @@ def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=
     :param scratch_length: length of the scratch in mm
     :return: Generates defect in the spacer
     """
-
+    df = pd.DataFrame(point_coo, dtype=np.float64)
+    df[1] = df[1]/grid_spacing
+    df[1] = df[1].round()
+    df[1] = df[1].astype(int)
+    print(df.dtypes)
     # Convert to meter
     r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
     h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), grid_spacing / np.tan(np.radians(beta))
@@ -437,24 +447,35 @@ def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=
     # r1 = r_inner + 0.7*scratch_length
 
     theta1 = get_theta(r0, r1, theta0, scratch_length)
-    x0, y0 = pol2cart(r0, theta0)
-    x0, y0 = closest_number(x0, point_coo[:, 0].copy()), closest_number(y0, point_coo[:, 1].copy())
+    x0, y0 = pol2cart(r0, np.radians(theta0))
+    y0 = closest_number(y0, point_coo[:, 1].copy())
+    df_ = df[df.loc[:, 1] == y0/grid_spacing]
+    x0 = closest_number(x0, np.array(df_[0]))
+
     x1, y1 = pol2cart(r1, theta1)
+    y1 = closest_number(y1, point_coo[:, 1].copy())
+    df_ = df[df.loc[:, 1] == y1/grid_spacing]
+    x1 = closest_number(x1, np.array(df_[0]))
+
     scratch_height = y1 - y0
     no_of_grids = int(scratch_height / grid_spacing)
+    if scratch_height > scratch_length:
+        scratch_length =scratch_height
     slope_scratch = np.arcsin(scratch_height/scratch_length)
 
     y_scratch = np.array([y0 + (i * grid_spacing) for i in range(no_of_grids)])
     x_scratch = [y_co/(np.tan(slope_scratch)) for y_co in y_scratch]
     x_scratch = x_scratch+x0
 
-    df = pd.DataFrame(point_coo, dtype= np.float64)
+
     for y_sc_co, x_sc_co in zip(y_scratch, x_scratch):
-        df_ = df[df.loc[:,1]==y_sc_co]        #point_coo[point_coo[:,1]==y_sc_co]
+        n = np.round_(y_sc_co/grid_spacing)
+        df_ = df[df.loc[:,1]==n]
+        # df_[1] = df[1]*grid_spacing
         x_sc_co_actual = closest_number(x_sc_co, np.array(df_[0]))
         for row in df_.itertuples():
             # Check if the combination is in the current row
-            if x_sc_co_actual in row and y_sc_co in row:
+            if x_sc_co_actual in row and y_sc_co/grid_spacing in row:
                 # If the combination is found, print a message and break out of the loop
                 print("Combination found in row:", row)
                 point_coo[row[0],2] = -h_defect  # to move the row down
@@ -485,7 +506,8 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
     point_coord, grid_spacing = get_point_co(my_realisation)
 
     # Error while updating theta0, anything without results in error, need to fix this.
-    point_coord = generate_defect(point_coord, grid_spacing, 14, 15 , 0 , 70, 40, 7)
+    # spacer_width is 3.8
+    point_coord = generate_defect(point_coord, grid_spacing, 12.55, 16.1 , 45 , 70, 40, 5)
 
     vertices = get_vertices(point_coord)
 
@@ -512,5 +534,5 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X100_dx369.7.csv'
+    path = 'topology/points_X50_dx184.85.csv'
     main(path, perform_boolean=True)
