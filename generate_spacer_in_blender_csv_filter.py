@@ -1,5 +1,5 @@
-import pydevd_pycharm
-pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+# import pydevd_pycharm
+# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import bmesh
 import bpy
@@ -379,12 +379,20 @@ def update_mesh_defect(point_coord: np.ndarray, existing_mesh):
     bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)  # Updates the mesh in scene by refreshing the screen
 
 
-def get_theta(r1, r2, theta1, distance):
+def get_theta(r1, r2, theta0, distance):
+    """
+
+    :param r1: micrometer
+    :param r2: micrometer
+    :param theta0: degree
+    :param distance: micrometer
+    :return: radian
+    """
     if distance < r2-r1:
         distance = r2-r1
         warnings.warn("defect length is smaller than asked radius boundary, considered distance = r2-r1")
-    theta2 = np.arccos((r1**2+(r2**2)-(distance**2))/(2*r1*r2)) + np.radians(theta1)
-    return theta2
+    theta1 = np.arccos((r1**2+(r2**2)-(distance**2))/(2*r1*r2)) + np.radians(theta0)
+    return theta1
 
 
 def closest_number(target, arr):
@@ -449,12 +457,12 @@ def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=
     theta1 = get_theta(r0, r1, theta0, scratch_length)
     x0, y0 = pol2cart(r0, np.radians(theta0))
     y0 = closest_number(y0, point_coo[:, 1].copy())
-    df_ = df[df.loc[:, 1] == y0/grid_spacing]
+    df_ = df[df.loc[:, 1] == np.round_(y0/grid_spacing)]
     x0 = closest_number(x0, np.array(df_[0]))
 
     x1, y1 = pol2cart(r1, theta1)
     y1 = closest_number(y1, point_coo[:, 1].copy())
-    df_ = df[df.loc[:, 1] == y1/grid_spacing]
+    df_ = df[df.loc[:, 1] == np.round_(y1/grid_spacing)]
     x1 = closest_number(x1, np.array(df_[0]))
 
     scratch_height = y1 - y0
@@ -469,13 +477,13 @@ def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=
 
 
     for y_sc_co, x_sc_co in zip(y_scratch, x_scratch):
-        n = np.round_(y_sc_co/grid_spacing)
-        df_ = df[df.loc[:,1]==n]
+        y_sc_co_grid = np.round_(y_sc_co/grid_spacing)
+        df_ = df[df.loc[:,1]==y_sc_co_grid]
         # df_[1] = df[1]*grid_spacing
         x_sc_co_actual = closest_number(x_sc_co, np.array(df_[0]))
         for row in df_.itertuples():
             # Check if the combination is in the current row
-            if x_sc_co_actual in row and y_sc_co/grid_spacing in row:
+            if x_sc_co_actual in row and y_sc_co_grid in row:
                 # If the combination is found, print a message and break out of the loop
                 print("Combination found in row:", row)
                 point_coo[row[0],2] = -h_defect  # to move the row down
@@ -507,7 +515,7 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     # Error while updating theta0, anything without results in error, need to fix this.
     # spacer_width is 3.8
-    point_coord = generate_defect(point_coord, grid_spacing, 12.55, 16.1 , 45 , 70, 40, 5)
+    point_coord = generate_defect(point_coord, grid_spacing, 12, 15 , 60 , 70, 40, 5)
 
     vertices = get_vertices(point_coord)
 
@@ -534,5 +542,5 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X50_dx184.85.csv'
+    path = 'topology/points_X10_dx36.97.csv'
     main(path, perform_boolean=True)
