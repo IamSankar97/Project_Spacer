@@ -463,18 +463,20 @@ def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
     # df_ = df[df.loc[:, "Y_grid"] == np.round_(y1 / grid_spacing)]
     # x1, index = closest_number_(df_, x1, "X")
 
-    scratch_height = y1 - y0
-    no_of_grids = int(scratch_height / grid_spacing)
-    if scratch_height > scratch_length:
-        scratch_length = scratch_height
-    slope_scratch = np.arcsin(scratch_height / scratch_length)
+    rise = y1 - y0
+    run = x1 - x0
+    no_of_grids = int(rise / grid_spacing)
+    if rise > scratch_length:
+        run = rise
+    slope_scratch = rise / run
 
     for i in range(no_of_grids):
-        y_sc_co = y0 + (i * grid_spacing)       # Scratch coordinate y
-        x_sc_co = y_sc_co / (np.tan(slope_scratch)) + x0    # Scratch coordinate x
-        y_sc_co_grid = np.round_(y_sc_co / grid_spacing)    # Scratch coordinate y's grid point
-        df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]       # Filtering out x points where ygrid id y's grid point
-        x_sc_co_actual, index = closest_number_(df_, x_sc_co, "X")      # Filtering out x points where ygrid id y's grid point
+        y_sc_co = y0 + (i * grid_spacing)  # Scratch coordinate y
+        x_sc_co = (y_sc_co - y0) / slope_scratch + x0  # Scratch coordinate x
+        y_sc_co_grid = np.round_(y_sc_co / grid_spacing)  # Scratch coordinate y's grid point
+        df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
+        x_sc_co_actual, index = closest_number_(df_, x_sc_co,
+                                                "X")  # Filtering out x points where ygrid id y's grid point
         point_coo["Z"][index] = -h_defect
 
     return point_coo
@@ -498,7 +500,7 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     # Error while updating theta0, anything without results in error, need to fix this.
     # spacer_width is 3.8
-    point_coord = generate_defect(point_coord, grid_spacing, 12, 15, 0, 70, 40, 5)
+    point_coord = generate_defect(point_coord, grid_spacing, 12, 15, 70, 70, 40, 5)
 
     vertices = get_vertices(np.array(point_coord))
 
