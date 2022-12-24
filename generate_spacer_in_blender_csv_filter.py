@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import warnings
 import cmath
+import math
 
 np.random.seed(0)
 
@@ -301,7 +302,10 @@ def get_point_co(my_realisation: np.ndarray):
         [np.array([x, y, z]) for x_, y_, z_ in zip(Xmesh, Ymesh, surface)
          for x, y, z in zip(x_, y_, z_)])
 
-    return point_coords, grid_spacing
+    df_points = pd.DataFrame(point_coords, dtype=np.float64)
+    df_points.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
+
+    return df_points, grid_spacing
 
 
 def get_vertices(point_coords):
@@ -388,43 +392,34 @@ def get_theta(r1, r2, theta0, distance):
     :param distance: micrometer
     :return: radian
     """
-    if distance < r2-r1:
-        distance = r2-r1
+    if distance < r2 - r1:
+        distance = r2 - r1
         warnings.warn("defect length is smaller than asked radius boundary, considered distance = r2-r1")
-    theta1 = np.arccos((r1**2+(r2**2)-(distance**2))/(2*r1*r2)) + np.radians(theta0)
+    theta1 = np.arccos((r1 ** 2 + (r2 ** 2) - (distance ** 2)) / (2 * r1 * r2)) + np.radians(theta0)
     return theta1
 
 
-def closest_number(target, arr):
-    # Sort the array in ascending order
-    arr.sort()
-
-    # Initialize variables for binary search
-    low = 0
-    high = len(arr) - 1
-
-    # Binary search for target number
+def closest_number_(df: pd.DataFrame, value: float, column: str):
+    df.sort_values(by=column)
+    low = df.index[0]
+    high = df.index[-1]
     while low <= high:
-        mid = (low + high) // 2  # Calculate midpoint
-        if arr[mid] == target:  # If target is found, return it
-            return arr[mid]
-        elif arr[mid] < target:  # If midpoint is less than target, search right half of array
-            if low == high:
-                low -=1
-                break
-            else:
-                low = mid + 1
-        else:  # If midpoint is greater than target, search left half of array
+        mid = math.floor((low + high) / 2)
+        if df.loc[mid, column] < value:
+            low = mid + 1
+        elif df.loc[mid, column] > value:
             high = mid - 1
+        else:
+            return df[column][mid], mid
 
     # If target is not found, return closest number
-    if abs(arr[low] - target) < abs(arr[high] - target):
-        return arr[low]
+    if abs(df[column][low] - value) < abs(df[column][high] - value):
+        return df[column][low], low
     else:
-        return arr[high]
+        return df[column][high], high
 
 
-def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=0.0,
+def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
                     beta=0.0, scratch_length: float = 0.0):
     """
     Note:
@@ -442,57 +437,45 @@ def generate_defect(point_coo: np.ndarray, grid_spacing, r0, r1,  theta0, alpha=
     :param scratch_length: length of the scratch in mm
     :return: Generates defect in the spacer
     """
-    df = pd.DataFrame(point_coo, dtype=np.float64)
-    df[1] = df[1]/grid_spacing
-    df[1] = df[1].round()
-    df[1] = df[1].astype(int)
-    print(df.dtypes)
+    df = point_coo.copy()
+    df['Y_grid'] = df['Y'].div(grid_spacing)
+    df['Y_grid'] = df['Y_grid'].round()
+    df['Y_grid'] = df['Y_grid'].astype(int)
+
     # Convert to meter
     r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
     h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), grid_spacing / np.tan(np.radians(beta))
-    h_defect = h_total-h_up
-    # r0, theta0 = r_inner, 0
-    # r1 = r_inner + 0.7*scratch_length
+    h_defect = h_total - h_up
 
+    #   Calculating start coordinate of defect
     theta1 = get_theta(r0, r1, theta0, scratch_length)
     x0, y0 = pol2cart(r0, np.radians(theta0))
-    y0 = closest_number(y0, point_coo[:, 1].copy())
-    df_ = df[df.loc[:, 1] == np.round_(y0/grid_spacing)]
-    x0 = closest_number(x0, np.array(df_[0]))
+    y0, index = closest_number_(df, y0, "Y")
+    df_ = df[df.loc[:, "Y_grid"] == np.round_(y0 / grid_spacing)]
+    x0, index = closest_number_(df_, x0, "X")
 
+    #   Calculating end coordinate of defect
     x1, y1 = pol2cart(r1, theta1)
-    y1 = closest_number(y1, point_coo[:, 1].copy())
-    df_ = df[df.loc[:, 1] == np.round_(y1/grid_spacing)]
-    x1 = closest_number(x1, np.array(df_[0]))
+    y1, index = closest_number_(df, y1, "Y")
+
+    #   X1 will be interpolate based on the slope in following code
+    #   Below two lines doesnt contribute to the program
+    # df_ = df[df.loc[:, "Y_grid"] == np.round_(y1 / grid_spacing)]
+    # x1, index = closest_number_(df_, x1, "X")
 
     scratch_height = y1 - y0
     no_of_grids = int(scratch_height / grid_spacing)
     if scratch_height > scratch_length:
-        scratch_length =scratch_height
-    slope_scratch = np.arcsin(scratch_height/scratch_length)
+        scratch_length = scratch_height
+    slope_scratch = np.arcsin(scratch_height / scratch_length)
 
-    y_scratch = np.array([y0 + (i * grid_spacing) for i in range(no_of_grids)])
-    x_scratch = [y_co/(np.tan(slope_scratch)) for y_co in y_scratch]
-    x_scratch = x_scratch+x0
-
-
-    for y_sc_co, x_sc_co in zip(y_scratch, x_scratch):
-        y_sc_co_grid = np.round_(y_sc_co/grid_spacing)
-        df_ = df[df.loc[:,1]==y_sc_co_grid]
-        # df_[1] = df[1]*grid_spacing
-        x_sc_co_actual = closest_number(x_sc_co, np.array(df_[0]))
-        for row in df_.itertuples():
-            # Check if the combination is in the current row
-            if x_sc_co_actual in row and y_sc_co_grid in row:
-                # If the combination is found, print a message and break out of the loop
-                print("Combination found in row:", row)
-                point_coo[row[0],2] = -h_defect  # to move the row down
-                break
-            # If the loop completes without finding the combination, print a message
-            else:
-                print("Combination not found in array")
-
-    # x_scratch_left, x_scratch_right = x_scratch_actual - grid_spacing, x_scratch_actual + grid_spacing
+    for i in range(no_of_grids):
+        y_sc_co = y0 + (i * grid_spacing)       # Scratch coordinate y
+        x_sc_co = y_sc_co / (np.tan(slope_scratch)) + x0    # Scratch coordinate x
+        y_sc_co_grid = np.round_(y_sc_co / grid_spacing)    # Scratch coordinate y's grid point
+        df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]       # Filtering out x points where ygrid id y's grid point
+        x_sc_co_actual, index = closest_number_(df_, x_sc_co, "X")      # Filtering out x points where ygrid id y's grid point
+        point_coo["Z"][index] = -h_defect
 
     return point_coo
 
@@ -515,9 +498,9 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     # Error while updating theta0, anything without results in error, need to fix this.
     # spacer_width is 3.8
-    point_coord = generate_defect(point_coord, grid_spacing, 12, 15 , 60 , 70, 40, 5)
+    point_coord = generate_defect(point_coord, grid_spacing, 12, 15, 0, 70, 40, 5)
 
-    vertices = get_vertices(point_coord)
+    vertices = get_vertices(np.array(point_coord))
 
     csv_file = address.split('/')[-1].split('.')
     name = csv_file[0] + '.' + csv_file[1]
@@ -542,5 +525,5 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X10_dx36.97.csv'
+    path = 'topology/points_X100_dx369.7_0.csv'
     main(path, perform_boolean=True)
