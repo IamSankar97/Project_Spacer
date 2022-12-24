@@ -392,15 +392,13 @@ def get_theta(r1, r2, theta0, distance):
     :param distance: micrometer
     :return: radian
     """
-    if distance < r2 - r1:
-        distance = r2 - r1
-        warnings.warn("defect length is smaller than asked radius boundary, considered distance = r2-r1")
     theta1 = np.arccos((r1 ** 2 + (r2 ** 2) - (distance ** 2)) / (2 * r1 * r2)) + np.radians(theta0)
     return theta1
 
 
 def closest_number_(df: pd.DataFrame, value: float, column: str):
     df.sort_values(by=column)
+    df.reset_index(inplace=True)
     low = df.index[0]
     high = df.index[-1]
     while low <= high:
@@ -410,13 +408,13 @@ def closest_number_(df: pd.DataFrame, value: float, column: str):
         elif df.loc[mid, column] > value:
             high = mid - 1
         else:
-            return df[column][mid], mid
+            return df[column][mid], df['index'][mid]
 
     # If target is not found, return closest number
     if abs(df[column][low] - value) < abs(df[column][high] - value):
-        return df[column][low], low
+        return df[column][low], df['index'][mid]
     else:
-        return df[column][high], high
+        return df[column][high], df['index'][mid]
 
 
 def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
@@ -437,47 +435,63 @@ def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
     :param scratch_length: length of the scratch in mm
     :return: Generates defect in the spacer
     """
-    df = point_coo.copy()
-    df['Y_grid'] = df['Y'].div(grid_spacing)
-    df['Y_grid'] = df['Y_grid'].round()
-    df['Y_grid'] = df['Y_grid'].astype(int)
 
     # Convert to meter
     r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
+    if scratch_length < abs(r0 - r1):
+        scratch_length = abs(r0 - r1)
+        warnings.warn("defect length is smaller than asked radius boundary, considered distance = r2-r1")
+
     h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), grid_spacing / np.tan(np.radians(beta))
     h_defect = h_total - h_up
 
-    #   Calculating start coordinate of defect
+    #   Calculating start and end coordinate of defect
     theta1 = get_theta(r0, r1, theta0, scratch_length)
     x0, y0 = pol2cart(r0, np.radians(theta0))
-    y0, index = closest_number_(df, y0, "Y")
-    df_ = df[df.loc[:, "Y_grid"] == np.round_(y0 / grid_spacing)]
-    x0, index = closest_number_(df_, x0, "X")
-
-    #   Calculating end coordinate of defect
     x1, y1 = pol2cart(r1, theta1)
-    y1, index = closest_number_(df, y1, "Y")
 
-    #   X1 will be interpolate based on the slope in following code
-    #   Below two lines doesnt contribute to the program
+    # #   Experimental hidden. If not found usefull shall be removed from the code
+    # y0, index = closest_number_(df, y0, "Y")
+    # df_ = df[df.loc[:, "Y_grid"] == np.round_(y0 / grid_spacing)]
+    # x0, index = closest_number_(df_, x0, "X")
+    # y1, index = closest_number_(df, y1, "Y")
     # df_ = df[df.loc[:, "Y_grid"] == np.round_(y1 / grid_spacing)]
     # x1, index = closest_number_(df_, x1, "X")
 
-    rise = y1 - y0
-    run = x1 - x0
-    no_of_grids = int(rise / grid_spacing)
+    rise = abs(y1 - y0)
+    run = abs(x1 - x0)
     if rise > scratch_length:
         run = rise
     slope_scratch = rise / run
+    if rise > run:
+        df = point_coo.copy()
+        df['Y_grid'] = df['Y'].div(grid_spacing)
+        df['Y_grid'] = df['Y_grid'].round()
+        df['Y_grid'] = df['Y_grid'].astype(int)
+        no_of_grids_y = int(np.round_(rise / grid_spacing))
+        for i in range(no_of_grids_y):
+            y_sc_co = y0 + (i * grid_spacing)  # Scratch coordinate y
+            x_sc_co = (y_sc_co - y0) / slope_scratch + x0  # Scratch coordinate x
+            y_sc_co_grid = np.round_(y_sc_co / grid_spacing)  # Scratch coordinate y's grid point
+            df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
+            x_sc_co_actual, index = closest_number_(df_, x_sc_co,
+                                                    "X")  # Filtering out x points where ygrid id y's grid point
+            point_coo["Z"][index] = -h_defect
 
-    for i in range(no_of_grids):
-        y_sc_co = y0 + (i * grid_spacing)  # Scratch coordinate y
-        x_sc_co = (y_sc_co - y0) / slope_scratch + x0  # Scratch coordinate x
-        y_sc_co_grid = np.round_(y_sc_co / grid_spacing)  # Scratch coordinate y's grid point
-        df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
-        x_sc_co_actual, index = closest_number_(df_, x_sc_co,
-                                                "X")  # Filtering out x points where ygrid id y's grid point
-        point_coo["Z"][index] = -h_defect
+    else:
+        df = point_coo.copy()
+        df['X_grid'] = df['X'].div(grid_spacing)
+        df['X_grid'] = df['X_grid'].round()
+        df['X_grid'] = df['X_grid'].astype(int)
+        no_of_grids_x = int(np.round_(run / grid_spacing))
+        for i in range(no_of_grids_x):
+            x_sc_co = x0 + (i * grid_spacing)  # Scratch coordinate x
+            y_sc_co = (abs(x_sc_co - x0) * slope_scratch) + y0  # Scratch coordinate y
+            x_sc_co_grid = np.round_(x_sc_co / grid_spacing)  # Scratch coordinate y's grid point
+            df_ = df[df.loc[:, "X_grid"] == x_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
+            x_sc_co_actual, index = closest_number_(df_, y_sc_co,
+                                                    "Y")  # Filtering out x points where ygrid id y's grid point
+            point_coo["Z"][index] = -h_defect
 
     return point_coo
 
@@ -500,7 +514,7 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     # Error while updating theta0, anything without results in error, need to fix this.
     # spacer_width is 3.8
-    point_coord = generate_defect(point_coord, grid_spacing, 12, 15, 70, 70, 40, 5)
+    point_coord = generate_defect(point_coord, grid_spacing, 12.5, 16, 1, 70, 40, 1)
 
     vertices = get_vertices(np.array(point_coord))
 
@@ -527,5 +541,5 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X100_dx369.7_0.csv'
+    path = 'topology/points_X10_dx36.97.csv'
     main(path, perform_boolean=True)
