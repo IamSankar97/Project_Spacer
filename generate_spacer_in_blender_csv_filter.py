@@ -470,13 +470,17 @@ def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
         df['Y_grid'] = df['Y_grid'].astype(int)
         no_of_grids_y = int(np.round_(rise / grid_spacing))
         for i in range(no_of_grids_y):
+            print(i)
             y_sc_co = y0 + (i * grid_spacing)  # Scratch coordinate y
             x_sc_co = (y_sc_co - y0) / slope_scratch + x0  # Scratch coordinate x
             y_sc_co_grid = np.round_(y_sc_co / grid_spacing)  # Scratch coordinate y's grid point
             df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
-            x_sc_co_actual, index = closest_number_(df_, x_sc_co,
-                                                    "X")  # Filtering out x points where ygrid id y's grid point
-            point_coo["Z"][index] = -h_defect
+            try:
+                x_sc_co_actual, index = closest_number_(df_, x_sc_co,
+                                                        "X")  # Filtering out x points where ygrid id y's grid point
+                point_coo["Z"][index] = -h_defect
+            except:
+                pass
 
     else:
         df = point_coo.copy()
@@ -485,13 +489,18 @@ def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
         df['X_grid'] = df['X_grid'].astype(int)
         no_of_grids_x = int(np.round_(run / grid_spacing))
         for i in range(no_of_grids_x):
+            print(i)
             x_sc_co = x0 + (i * grid_spacing)  # Scratch coordinate x
             y_sc_co = (abs(x_sc_co - x0) * slope_scratch) + y0  # Scratch coordinate y
             x_sc_co_grid = np.round_(x_sc_co / grid_spacing)  # Scratch coordinate y's grid point
             df_ = df[df.loc[:, "X_grid"] == x_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
-            x_sc_co_actual, index = closest_number_(df_, y_sc_co,
+            try:
+                x_sc_co_actual, index = closest_number_(df_, y_sc_co,
                                                     "Y")  # Filtering out x points where ygrid id y's grid point
-            point_coo["Z"][index] = -h_defect
+                point_coo["Z"][index] = -h_defect
+            except:
+                pass
+            # point_coo["Z"][index] = -h_defect
 
     return point_coo
 
@@ -514,14 +523,14 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
     # Error while updating theta0, anything without results in error, need to fix this.
     # spacer_width is 3.8
-    point_coord = generate_defect(point_coord, grid_spacing, 12.5, 16, 1, 70, 40, 1)
+    point_coord = generate_defect(point_coord, grid_spacing, 13, 16, 0.5, 70, 40, 1)
 
     vertices = get_vertices(np.array(point_coord))
 
     csv_file = address.split('/')[-1].split('.')
     name = csv_file[0] + '.' + csv_file[1]
 
-    generate_polygon(vertices, name)
+    generate_polygon(vertices, name,smoothing =0)
 
     spacer_surf = bpy.data.objects[name]
     cylinder = bpy.data.objects['Cylinder']
@@ -541,5 +550,5 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X10_dx36.97.csv'
+    path = 'topology/points_X5_dx18.485.csv'
     main(path, perform_boolean=True)
