@@ -1,16 +1,22 @@
 from operator import itemgetter
 import bpy
+import bmesh
+import numpy as np
 
 
 class Blender:
-    def __init__(self, point_coo):
+    def __init__(self, point_coo: np.ndarray):
         self.mesh_name = None
         self.point_coo = point_coo
         self.vertices = None
         self.unit = None
-        self.objs = bpy.data.objects
+        self.objs = None
 
-    def set_scene_linear_unit(self, desired: str):
+    def get_objs(self):
+        self.objs = bpy.data.objects
+        return self.objs
+
+    def set_scene_linear_unit(self, desired: str = 'METERS'):
         self.unit = desired
         bpy.context.scene.unit_settings.length_unit = self.unit
 
