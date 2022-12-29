@@ -104,7 +104,7 @@ def random_surf(address: str, grid_spacing: float, reduce_resolution_by: int = 1
 
     surf_height = pd.read_csv(address, delimiter=',')
     surf_height.fillna(surf_height.mean(), inplace=True)  # Filling few empty cells with mean
-    slippy_s = S.assurface(surf_height)  # Creating Slippy surface object
+    slippy_s = S.surface(surf_height)  # Creating Slippy surface object
     slippy_s.grid_spacing = grid_spacing  # Data from original height1.csv -> "XY calibration"
 
     desired_grid_spacing = grid_spacing * reduce_resolution_by
