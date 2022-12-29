@@ -1,5 +1,5 @@
-# import pydevd_pycharm
-# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+import pydevd_pycharm
+pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import bmesh
 import bpy
@@ -506,18 +506,17 @@ def generate_defect(point_coo, grid_spacing, r0, r1, theta0, alpha=0.0,
 
 
 def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perform_boolean: bool = False):
-    # spacer_outer_dia = (32.6 + grid_spacing * 2) * 1000  # mm to micrometer *1000, adding buffer of 1.4 mm
-    #
-    # lin_trans_surface_realised = random_surf(address, grid_spacing=grid_spacing,
-    #                                              reduce_resolution_by=reduce_resolution)
-    #
+    spacer_outer_dia = (32.6 + grid_spacing * 2) * 1000  # mm to micrometer *1000, adding buffer of 1.4 mm
 
-    #
-    # my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, True)
+    lin_trans_surface_realised = random_surf(address, grid_spacing=grid_spacing,
+                                                 reduce_resolution_by=reduce_resolution)
+
+
+    my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, True)
 
     bpy.context.scene.unit_settings.length_unit = 'METERS'
 
-    my_realisation = np.genfromtxt(address, delimiter=',')
+    # my_realisation = np.genfromtxt(address, delimiter=',')
 
     point_coord, grid_spacing = get_point_co(my_realisation)
 
@@ -530,7 +529,7 @@ def main(address: str, reduce_resolution: int = 1, smoothing: bool = False, perf
     csv_file = address.split('/')[-1].split('.')
     name = csv_file[0] + '.' + csv_file[1]
 
-    generate_polygon(vertices, name,smoothing =0)
+    generate_polygon(vertices, name, smoothing=0)
 
     spacer_surf = bpy.data.objects[name]
     cylinder = bpy.data.objects['Cylinder']
