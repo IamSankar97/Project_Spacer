@@ -24,22 +24,24 @@ def get_sample_surface(folder):
 
 
 def main(address):
+    count = 0
     for sample_surface, grid_spacing in get_sample_surface(address):
+        count += 1
+        if count > 1:
+            spacer = Spacer(sample_surface, grid_spacing)
+            # spacer.get_point_co()
+            spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
+            blend = Blender(np.array(spacer.point_coo))
+            blend.set_scene_linear_unit('METERS')
+            blend.get_vertices()
 
-        spacer = Spacer(sample_surface, grid_spacing)
-        # spacer.get_point_co()
-        spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
-        blend = Blender(np.array(spacer.point_coo))
-        blend.set_scene_linear_unit('METERS')
-        blend.get_vertices()
-
-        blend.generate_polygon('my_mesh')
-        objects = blend.get_objs()
-        spacer_surf = objects['my_mesh']
-        cylinder = objects['Cylinder']
-        blend.bool_intersect(spacer_surf, cylinder)
-        blend.update_scene()
-        break
+            blend.generate_polygon('my_mesh')
+            objects = blend.get_objs()
+            spacer_surf = objects['my_mesh']
+            cylinder = objects['Cylinder']
+            blend.bool_intersect(spacer_surf, cylinder)
+            blend.update_scene()
+            break
 
 
 if __name__ == "__main__":
