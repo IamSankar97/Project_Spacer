@@ -7,32 +7,41 @@ sys.path.append(os.getcwd())
 from spacer import Spacer
 # from generate_spacer_in_blender import get_vertices
 import numpy as np
+import random
 from blender import Blender
+import pickle
+
+
+def get_sample_surface(folder):
+    while True:
+        for filename in os.listdir(folder):
+            if filename.endswith('.pkl'):
+                with open(os.path.join(folder, filename), 'rb') as f:
+                    my_realisation = pickle.load(f) * 1e-6
+                    grid_spacing = my_realisation[0][0]
+                    surface = np.array(my_realisation[1:, :])
+                    yield surface, grid_spacing
 
 
 def main(address):
-    my_realisation = np.genfromtxt(address, delimiter=',') * 1e-6
-    grid_spacing = my_realisation[0][0]
-    surface = np.array(my_realisation[1:, :])
+    for sample_surface, grid_spacing in get_sample_surface(address):
 
-    spacer = Spacer(surface, grid_spacing)
-    # spacer.get_point_co()
-    spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
-    blend = Blender(np.array(spacer.point_coo))
-    blend.set_scene_linear_unit('METERS')
-    blend.get_vertices()
+        spacer = Spacer(sample_surface, grid_spacing)
+        # spacer.get_point_co()
+        spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
+        blend = Blender(np.array(spacer.point_coo))
+        blend.set_scene_linear_unit('METERS')
+        blend.get_vertices()
 
-    csv_file = address.split('/')[-1].split('.')
-    name = csv_file[0] + '.' + csv_file[1]
-
-    blend.generate_polygon(name)
-    objects = blend.get_objs()
-    spacer_surf = objects[name]
-    cylinder = objects['Cylinder']
-    blend.bool_intersect(spacer_surf, cylinder)
-    blend.update_scene()
+        blend.generate_polygon('my_mesh')
+        objects = blend.get_objs()
+        spacer_surf = objects['my_mesh']
+        cylinder = objects['Cylinder']
+        blend.bool_intersect(spacer_surf, cylinder)
+        blend.update_scene()
+        break
 
 
 if __name__ == "__main__":
-    path = 'topology/points_X5_dx18.485.csv'
+    path = 'topology/pkl_5/'
     main(path)
