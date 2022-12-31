@@ -2,7 +2,7 @@ import slippy.surface as S
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import pickle
 np.random.seed(0)
 
 
@@ -93,9 +93,10 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
     # focuses on the titanium alloy material for defect detection. Its appearance size is 32.6mm in Outer diameter 25mm
     # in Inner diameter and 4 mm in surface width and 1.7 mm in thickness.
 
-    path = '/home/mohanty/PycharmProjects/Digital-twin-for-hard-disk-spacer-ring-defect-detection' \
-           '/Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
-    address = address+"{}/".format(reduce_resolution_by)
+    path = '/home/mohanty/PycharmProjects/Digital_twin/' \
+           'Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
+    #address = address+"{}/".format(reduce_resolution_by)
+    address = address + "pkl_5/"
     grid_spacing = 3.697  # Original grid_spacing
 
     surf_height = pd.read_csv(path, delimiter=',')
@@ -103,13 +104,13 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
     slippy_s = S.assurface(surf_height)  # Creating Slippy surface object
     slippy_s.grid_spacing = grid_spacing  # Data from original height1.csv -> "XY calibration"
 
-    desired_grid_spacing = grid_spacing * reduce_resolution_by
+    desired_grid_spacing = np.round(grid_spacing * reduce_resolution_by, 3)
     lin_trans_surface_original = fit_random_filter_surface(slippy_s, grid_spacing)
     lin_trans_surface_realised = fit_random_filter_surface(slippy_s, desired_grid_spacing)
 
-    spacer_outer_dia = (32.6 + desired_grid_spacing * 2) * 1000  # mm to micrometer *1000
+    spacer_outer_dia = (32.6*1000) + (desired_grid_spacing * 2)   # mm to micrometer *1000
 
-    for i in range(0, 1):
+    for i in range(0, 20):
         my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
 
         if compare:
@@ -133,11 +134,17 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
         realisation.sort_index(inplace=True)
         realisation[0][0] = my_realisation.grid_spacing
 
-        np.savetxt(address + "points_X{multi}_dx{dx}_{index}.csv".format(multi=reduce_resolution_by,
-                                                                         dx=np.round(my_realisation.grid_spacing, 3),
-                                                                         index=i),
-                   np.array(realisation), delimiter=',')
+        with open(address + "points_{multi}_dx{dx}_{index}.pkl".format(multi=reduce_resolution_by,
+                                                                       dx=np.round(my_realisation.grid_spacing, 3),
+                                                                       index=i), "wb") as f:
+            pickle.dump(np.array(realisation), f)
 
+        # np.savetxt(address + "points_{multi}_dx{dx}_{index}.csv".format(multi=reduce_resolution_by,
+        #                                                                  dx=np.round(my_realisation.grid_spacing, 3),
+        #                                                                  index=i),
+        #            np.array(realisation), delimiter=',')
+
+        print("Done_{}".format(i))
 
 if __name__ == "__main__":
-    main("/home/mohanty/PycharmProjects/Blender_Debug/topology/", 10, compare=True, height_compare=True)
+    main("topology/", 5, compare=False, height_compare=False)
