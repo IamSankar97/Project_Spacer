@@ -40,8 +40,13 @@ class Blender:
         ySize = len(self.vertices) // xSize
 
         #   Generate the polygons (four vertices linked in a face)
-        polygons = [(i, i - 1, i - 1 + xSize, i + xSize) for i in range(1, len(self.vertices) - xSize) if
-                    i % xSize != 0]
+        polygons = []
+        for i in range(1, len(self.vertices) - xSize):
+            if i % xSize != 0:
+                polygons.append((i, i - 1, i - 1 + xSize, i + xSize))
+
+        # polygons = [(i, i - 1, i - 1 + xSize, i + xSize) for i in range(1, len(self.vertices) - xSize) if
+        #             i % xSize != 0]
 
         mesh = bpy.data.meshes.new(mesh_name)  # Create the mesh (inner data)
         obj = bpy.data.objects.new(mesh_name, mesh)  # Create an object
@@ -61,3 +66,24 @@ class Blender:
 
     def update_scene(self):
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+
+    def update_mesh_back_ground(self, new_realisation: np.ndarray, existing_mesh):
+        """
+
+        :param new_realisation: a numpy array with new mesh deta
+        :param existing_mesh: existing mesh where the new_realisation data to be updated
+        :return: updates mesh in blender
+        """
+        # Get a BMesh representation
+        bm = bmesh.new()  # create an empty BMesh
+        bm.from_mesh(existing_mesh.data)  # fill it in from a Mesh
+        self.get_vertices(new_realisation)
+
+        for vertice_old, vertice_new in zip(bm.verts, self.vertices):
+            vertice_old.co.z = vertice_new[2]  # if vertice_old.co.x == vertice_new[0] and
+            # vertice_old.co.y == vertice_new[1]:
+
+        bm.to_mesh(existing_mesh.data)  # Finish up, write the bmesh back to the mesh
+        bm.free()
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP',
+                                iterations=1)  # Updates the mesh in scene by refreshing the screen
