@@ -9,7 +9,8 @@ class Spacer:
     def __init__(self, surface: np.ndarray, grid_spacing: float):
         self.surface = surface
         self.grid_spacing = grid_spacing
-        self.point_coo = None
+        self.point_coo = pd.DataFrame()
+        self.vertices = None
 
     def get_point_co(self):
 
@@ -43,7 +44,7 @@ class Spacer:
         :param scratch_length: length of the scratch in mm
         :return: Generates defect in the spacer
         """
-        if self.point_coo == None:
+        if self.point_coo.empty:
             self.get_point_co()
         # Convert to meter
         r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
@@ -101,3 +102,8 @@ class Spacer:
                 except:
                     pass
 
+    def get_vertices(self):
+        if self.point_coo.empty:
+            self.get_point_co()
+        #   Read and sort the vertices coordinates (sort by x and y)
+        self.vertices = sorted([(float(r[0]), float(r[1]), float(r[2])) for r in self.point_coo], key=itemgetter(0, 1))
