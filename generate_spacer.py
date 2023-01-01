@@ -5,9 +5,7 @@ import sys
 import os
 sys.path.append(os.getcwd())
 from spacer import Spacer
-# from generate_spacer_in_blender import get_vertices
 import numpy as np
-import random
 from blender import Blender
 import pickle
 
@@ -27,10 +25,10 @@ def main(address):
     count = 0
     for sample_surface, grid_spacing in get_sample_surface(address):
         count += 1
-        if count > 1:
-            spacer = Spacer(sample_surface, grid_spacing)
-            # spacer.get_point_co()
-            spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
+        spacer = Spacer(sample_surface, grid_spacing)
+        spacer.get_point_co()
+        spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
+        if count == 1:
             blend = Blender(np.array(spacer.point_coo))
             blend.set_scene_linear_unit('METERS')
             blend.get_vertices()
@@ -42,8 +40,10 @@ def main(address):
             blend.bool_intersect(spacer_surf, cylinder)
             blend.update_scene()
             break
+        else:
+            break
 
 
 if __name__ == "__main__":
-    path = 'topology/pkl_5/'
+    path = 'topology/pkl_50/'
     main(path)
