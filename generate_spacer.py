@@ -27,23 +27,21 @@ def main(address):
         count += 1
         spacer = Spacer(sample_surface, grid_spacing)
         spacer.get_point_co()
-        spacer.generate_defect(13, 16, 0.5, 70, 40, 1)
+        spacer.generate_defect(13, 16, 25, 70, 40, 4)
         if count == 1:
             blend = Blender(np.array(spacer.point_coo))
             blend.set_scene_linear_unit('METERS')
-            blend.get_vertices()
-
             blend.generate_polygon('my_mesh')
             objects = blend.get_objs()
             spacer_surf = objects['my_mesh']
             cylinder = objects['Cylinder']
             blend.bool_intersect(spacer_surf, cylinder)
-            blend.update_scene()
+            # blend.update_scene()
             break
         else:
             break
 
 
 if __name__ == "__main__":
-    path = 'topology/pkl_50/'
+    path = 'topology/pkl_5/'
     main(path)
