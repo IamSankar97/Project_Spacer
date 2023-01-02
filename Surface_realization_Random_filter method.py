@@ -96,7 +96,7 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
     path = '/home/mohanty/PycharmProjects/Digital_twin/' \
            'Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
     #address = address+"{}/".format(reduce_resolution_by)
-    address = address + "pkl_5/"
+    address = address + "pkl_50/"
     grid_spacing = 3.697  # Original grid_spacing
 
     surf_height = pd.read_csv(path, delimiter=',')
@@ -108,7 +108,7 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
     lin_trans_surface_original = fit_random_filter_surface(slippy_s, grid_spacing)
     lin_trans_surface_realised = fit_random_filter_surface(slippy_s, desired_grid_spacing)
 
-    spacer_outer_dia = (32.6*1000) + (desired_grid_spacing * 2)   # mm to micrometer *1000
+    spacer_outer_dia = (32*1000) + (desired_grid_spacing * 1)   # mm to micrometer *1000
 
     for i in range(0, 20):
         my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
@@ -147,4 +147,4 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
         print("Done_{}".format(i))
 
 if __name__ == "__main__":
-    main("topology/", 5, compare=False, height_compare=False)
+    main("topology/", 50, compare=False, height_compare=False)
