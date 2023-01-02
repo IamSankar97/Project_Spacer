@@ -36,6 +36,8 @@ def main(address):
             spacer_surf = objects['my_mesh']
             cylinder = objects['Cylinder']
             blend.bool_intersect(spacer_surf, cylinder)
+            blend.assign_material(spacer_surf)
+            blend.update_mat({'Roughness': 0, 'Metallic': 1})
             # blend.update_scene()
             break
         else:

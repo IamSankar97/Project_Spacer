@@ -6,6 +6,7 @@ import numpy as np
 
 class Blender:
     def __init__(self, point_coo: np.ndarray):
+        self.mat = None
         self.mesh_name = None
         self.vertices = list(point_coo)
         self.unit = None
@@ -81,3 +82,13 @@ class Blender:
         bm.free()
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP',
                                 iterations=1)  # Updates the mesh in scene by refreshing the screen
+
+    def assign_material(self, object : bpy.data.objects, mat_name: str='Material'):
+        self.mat = bpy.data.materials.new(name=mat_name)
+        object.data.materials.append(self.mat)
+        self.mat.use_nodes = True
+
+    def update_mat(self, property: dict):
+        mat_nodes = self.mat.node_tree.nodes
+        for key, value in property.items():
+            mat_nodes['Principled BSDF'].inputs[key].default_value = value
