@@ -7,8 +7,7 @@ import numpy as np
 class Blender:
     def __init__(self, point_coo: np.ndarray):
         self.mesh_name = None
-        self.point_coo = point_coo
-        self.vertices = None
+        self.vertices = list(point_coo)
         self.unit = None
         self.objs = None
 
@@ -19,11 +18,6 @@ class Blender:
     def set_scene_linear_unit(self, desired: str = 'METERS'):
         self.unit = desired
         bpy.context.scene.unit_settings.length_unit = self.unit
-
-    def get_vertices(self):
-        #   Read and sort the vertices coordinates (sort by x and y)
-        self.vertices = sorted([(float(r[0]), float(r[1]), float(r[2])) for r in self.point_coo],
-                               key=itemgetter(0, 1))
 
     def generate_polygon(self, mesh_name: str = 'my_mesh', smoothing: bool = 0):
         """
