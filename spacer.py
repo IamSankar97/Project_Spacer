@@ -11,6 +11,7 @@ class Spacer:
         self.grid_spacing = grid_spacing
         self.point_coo = pd.DataFrame()
         self.vertices = None
+        self.spacer_coo = pd.DataFrame()
 
     def get_point_co(self):
 
@@ -26,7 +27,7 @@ class Spacer:
 
         df_point_coords = pd.DataFrame(point_coords, dtype=np.float64)
         df_point_coords.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
-
+        df_point_coords.sort_values(by=['X', 'Y'], inplace=True)
         self.point_coo = df_point_coords
 
     def generate_defect(self, r0, r1, theta0, alpha=0.0,
@@ -102,8 +103,12 @@ class Spacer:
                 except:
                     pass
 
-    def get_vertices(self):
-        if self.point_coo.empty:
-            self.get_point_co()
-        #   Read and sort the vertices coordinates (sort by x and y)
-        self.vertices = sorted([(float(r[0]), float(r[1]), float(r[2])) for r in self.point_coo], key=itemgetter(0, 1))
+    def filter_spacer_point_co(self, r0: float, r1: float):
+        point_co = self.point_coo.copy()
+
+        polar_co = np.array([cart2pol(row['X'], row['Y'])
+                             for index, row in self.point_coo.iterrows()])
+        point_co["r"], point_co['theta'] = polar_co[:, 0], polar_co[:, 1]
+
+        point_co_ = point_co.loc[(point_co["r"] <= r1) & (point_co["r"] >= r0)]
+        self.spacer_coo = point_co_[['X', 'Y', 'Z']]
