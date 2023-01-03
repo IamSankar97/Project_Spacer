@@ -34,7 +34,7 @@ def main(addr_topology: str, addr_img_save: str):
         ro, r1, theta0, defect_length, defect_type = \
             np.round(np.random.uniform(12.5, 13.2), 2), \
             np.round(np.random.uniform(13.8, 16), 2), \
-            np.random.randint(1, 72), \
+            np.random.randint(1, 85), \
             np.round(np.random.uniform(2, 10), 2), \
             count%2
         spacer.randomize_defect(ro, r1, theta0, 70, 40, 4, defect_type)
@@ -52,8 +52,8 @@ def main(addr_topology: str, addr_img_save: str):
             result_image = blend.render(file_path=addr_img_save, save=True, engine='CYCLES')
             end = time.time()
             print("Total time elapsed_ {}_st generation:".format(count), end - start)
-            result_image.save('spacer_render/image_{cout}_{r0}r0_{r1}r1_{th}_th0.png'
-                              .format(cout=count, r0=ro, r1=r1, th=theta0))
+            result_image.save('spacer_render/image_{cout}_{r0}r0_{r1}r1_{th}th0_{ln}ln_{ty}ty.png'
+                              .format(cout=count, r0=ro, r1=r1, th=theta0, ln=defect_length, ty=defect_type))
 
         else:
             start = time.time()
@@ -64,8 +64,8 @@ def main(addr_topology: str, addr_img_save: str):
             end = time.time()
             print("Total time elapsed_{}_st generation:".format(count), end - start)
             # result_image.show()
-            result_image.save('spacer_render/image_{cout}_{r0}r0_{r1}r1_{th}th0.png'
-                              .format(cout=count, r0=ro, r1=r1, th=theta0))
+            result_image.save('spacer_render/image_{cout}_{r0}r0_{r1}r1_{th}th0_{ln}ln_{ty}ty.png'
+                              .format(cout=count, r0=ro, r1=r1, th=theta0, ln=defect_length, ty=defect_type))
 
 
 if __name__ == "__main__":
