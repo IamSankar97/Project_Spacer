@@ -92,9 +92,9 @@ class Blender:
         obj.data.materials.append(self.mat)
         self.mat.use_nodes = True
 
-    def update_mat(self, property: dict):
+    def update_mat(self, mat_property: dict):
         mat_nodes = self.mat.node_tree.nodes
-        for key, value in property.items():
+        for key, value in mat_property.items():
             mat_nodes['Principled BSDF'].inputs[key].default_value = value
 
     def render(self, file_path: str, resolution: tuple = (2448, 2048), save: bool = True,
