@@ -65,9 +65,12 @@ class Spacer:
 
         rise = abs(y1 - y0)
         run = abs(x1 - x0)
+
         if rise > scratch_length:
             run = rise
         slope_scratch = rise / run
+
+        # This check is to choose whether to discritize along X direction or Y direction
         if rise > run:
 
             df = self.point_coo.copy()
@@ -77,7 +80,7 @@ class Spacer:
             no_of_grids_y = int(np.round_(rise / self.grid_spacing))
             for i in range(no_of_grids_y):
                 y_sc_co = y0 + (i * self.grid_spacing)  # Scratch coordinate y
-                x_sc_co = (y_sc_co - y0) / slope_scratch + x0  # Scratch coordinate x
+                x_sc_co = ((y_sc_co - y0) / slope_scratch) + x0  # Scratch coordinate x
                 y_sc_co_grid = np.round_(y_sc_co / self.grid_spacing)  # Scratch coordinate y's grid point
                 df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
                 try:

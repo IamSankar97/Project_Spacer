@@ -2,10 +2,8 @@ from operator import itemgetter
 import bpy
 import bmesh
 import numpy as np
-import os
 import sys
 sys.path.append('/home/mohanty/.local/lib/python3.10/site-packages/')
-import OpenGL.GL as GL
 from blendtorch import btb
 from PIL import Image
 
@@ -24,6 +22,9 @@ class Blender:
     def set_scene_linear_unit(self, desired: str = 'METERS'):
         self.unit = desired
         bpy.context.scene.unit_settings.length_unit = self.unit
+
+    def update_scene(self):
+        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
     def generate_polygon(self, mesh_name: str = 'my_mesh', smoothing: bool = 0):
         """
@@ -57,15 +58,14 @@ class Blender:
                 p.use_smooth = True
 
         bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+        # self.update_scene()
 
     def bool_intersect(self, obj1, obj2):
         bool_one = obj1.modifiers.new(type="BOOLEAN", name="bool 1")
         bool_one.object = obj2
         bool_one.operation = 'INTERSECT'
         obj2.hide_set(True)
-
-    def update_scene(self):
-        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+        self.update_scene()
 
     def update_mesh_back_ground(self, new_realisation: np.ndarray, existing_mesh):
         """
@@ -77,15 +77,14 @@ class Blender:
         # Get a BMesh representation
         bm = bmesh.new()  # create an empty BMesh
         bm.from_mesh(existing_mesh.data)  # fill it in from a Mesh
-
+        self.vertices = list(new_realisation)
         for vertice_old, vertice_new in zip(bm.verts, self.vertices):
             vertice_old.co.z = vertice_new[2]  # if vertice_old.co.x == vertice_new[0] and
             # vertice_old.co.y == vertice_new[1]:
 
         bm.to_mesh(existing_mesh.data)  # Finish up, write the bmesh back to the mesh
         bm.free()
-        bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP',
-                                iterations=1)  # Updates the mesh in scene by refreshing the screen
+        self.update_scene()  # Updates the mesh in scene by refreshing the screen
 
     def assign_material(self, obj: bpy.data.objects, mat_name: str = 'Material'):
         self.mat = bpy.data.materials.new(name=mat_name)
@@ -93,6 +92,7 @@ class Blender:
         self.mat.use_nodes = True
 
     def update_mat(self, mat_property: dict):
+        self.mat.use_nodes = True
         mat_nodes = self.mat.node_tree.nodes
         for key, value in mat_property.items():
             mat_nodes['Principled BSDF'].inputs[key].default_value = value
@@ -107,7 +107,6 @@ class Blender:
 
             bpy.ops.render.render(write_still=save)
             image = Image.open(file_path)
-
             return image
 
         elif engine == 'EEVEE':
