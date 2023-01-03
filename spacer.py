@@ -12,6 +12,8 @@ class Spacer:
         self.point_coo = pd.DataFrame()
         self.vertices = None
         self.spacer_coo = pd.DataFrame()
+        self.outer_radius = 16
+        self.inner_radius = 12.2
 
     def get_point_co(self):
 
@@ -31,7 +33,7 @@ class Spacer:
         self.point_coo = df_point_coords
 
     def generate_defect(self, r0, r1, theta0, alpha=0.0,
-                        beta=0.0, scratch_length: float = 0.0):
+                        beta=0.0, scratch_length: float = 0.0, return_theta: bool = False):
         """
         Note:
             It takes starting point of defect (r0, theta0), end point of defect r1 (calculates theta2) and defect length to prescribe
@@ -102,6 +104,8 @@ class Spacer:
                     self.point_coo["Z"][index] = -h_defect
                 except:
                     pass
+        if return_theta:
+            return np.degrees(theta1)
 
     def filter_spacer_point_co(self, r0: float, r1: float):
         point_co = self.point_coo.copy()
@@ -112,3 +116,39 @@ class Spacer:
 
         point_co_ = point_co.loc[(point_co["r"] <= r1) & (point_co["r"] >= r0)]
         self.spacer_coo = point_co_[['X', 'Y', 'Z']]
+
+    def randomize_defect(self, r0, r1, theta0, alpha=0.0,
+                         beta=0.0, scratch_length: float = 0.0, defect_type: int = 0):
+        """
+        0: cluster linear defect
+        1. cluster cross_defect
+        2. cluster linear and cross_defect
+        Returns
+        -------
+        Topology with defect
+        """
+        if defect_type == 0:
+            number_of_defects = np.random.randint(1, 4)
+            for i in range(number_of_defects):
+                if i == 0:
+                    self.generate_defect(r0, r1, theta0, alpha, beta, scratch_length)
+                else:
+                    angle_difference = np.random.randint(4, 10)
+                    self.generate_defect(r0, r1, theta0 + angle_difference, alpha, beta, scratch_length)
+
+        elif defect_type == 1:
+            number_of_defects = np.random.randint(1, 4)
+            split_region = np.random.randint(3, 5)
+            r2 = r1
+            r1, scratch_length1 = r0+((r2 - r0)*(split_region*0.1)), scratch_length * split_region * 0.1
+            scratch_length2 = scratch_length
+            for i in range(number_of_defects):
+                if i == 0:
+                    theta1 = self.generate_defect(r0, r1, theta0, alpha, beta,
+                                                  scratch_length1, return_theta=True)
+                else:
+                    angle_difference = np.random.randint(4, 10)
+                    theta1 = self.generate_defect(r0, r1, theta0 + angle_difference, alpha, beta,
+                                                  scratch_length1, return_theta=True)
+                self.generate_defect(r1, r2, theta1, alpha, beta,
+                                     scratch_length2)
