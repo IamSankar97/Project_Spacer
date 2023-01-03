@@ -2,7 +2,12 @@ from operator import itemgetter
 import bpy
 import bmesh
 import numpy as np
-
+import os
+import sys
+sys.path.append('/home/mohanty/.local/lib/python3.10/site-packages/')
+import OpenGL.GL as GL
+from blendtorch import btb
+from PIL import Image
 
 class Blender:
     def __init__(self, point_coo: np.ndarray):
@@ -72,7 +77,6 @@ class Blender:
         # Get a BMesh representation
         bm = bmesh.new()  # create an empty BMesh
         bm.from_mesh(existing_mesh.data)  # fill it in from a Mesh
-        self.get_vertices(new_realisation)
 
         for vertice_old, vertice_new in zip(bm.verts, self.vertices):
             vertice_old.co.z = vertice_new[2]  # if vertice_old.co.x == vertice_new[0] and
@@ -83,12 +87,40 @@ class Blender:
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP',
                                 iterations=1)  # Updates the mesh in scene by refreshing the screen
 
-    def assign_material(self, object : bpy.data.objects, mat_name: str='Material'):
+    def assign_material(self, obj: bpy.data.objects, mat_name: str = 'Material'):
         self.mat = bpy.data.materials.new(name=mat_name)
-        object.data.materials.append(self.mat)
+        obj.data.materials.append(self.mat)
         self.mat.use_nodes = True
 
     def update_mat(self, property: dict):
         mat_nodes = self.mat.node_tree.nodes
         for key, value in property.items():
             mat_nodes['Principled BSDF'].inputs[key].default_value = value
+
+    def render(self, file_path: str, resolution: tuple = (2448, 2048), save: bool = True,
+               engine: str = 'CYCLES'):
+
+        if engine == "CYCLES":
+            # Set the rendering engine to Cycles
+            bpy.context.scene.render.engine = engine
+            bpy.context.scene.render.filepath = file_path
+
+            bpy.ops.render.render(write_still=save)
+            image = Image.open(file_path)
+
+            return image
+
+        elif engine == 'EEVEE':
+            bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+
+            cam = btb.Camera()
+            off = btb.OffScreenRenderer(camera=cam, mode='rgb')
+            off.set_render_style(shading='RENDERED', overlays=False)
+            image = np.array(off.render())
+
+            image_ = Image.fromarray(image.astype(np.uint8))
+
+            # Save the image to a file
+            image_.save(file_path, format='PNG')
+
+            return image_
