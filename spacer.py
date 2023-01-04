@@ -34,18 +34,10 @@ class Spacer:
 
     def get_spacer_point_co(self):
         """
-
-        Parameters
-        ----------
-        r0: Spacer Inner radius in mm
-        r1: Spacer Outer radius in mm
-
         Returns
         -------
         results vertices, by modifying point coordinates such that
         """
-
-        # r0, r1 = r0 * 1e-3, r1 * 1e-3
 
         end_l, end_r = int(-self.surface.shape[0] / 2), int(self.surface.shape[0] / 2)
 
@@ -53,17 +45,24 @@ class Spacer:
         Y = X
         Xmesh, Ymesh = np.meshgrid(X, Y)
 
-        x = 5
-        y = 10
-        max_value = x if x > y else y
-        print(max_value)  # prints 10
+        def update_z(x, y, h):
+            """
+            Parameters
+            ----------
+            x : Position of grid at x
+            y : Position of grid at y
+            h : Height at that grid point
 
-        def update_z(a, b, c):
-            r = np.sqrt(a ** 2 + b ** 2)
+            Returns
+            -------
+                if grid_point falls between spacer O_radius and I_radius retains height else updates height to 1
+                This 1 will later be used in blender script to avoid these vertices getting created
+            """
+            r = np.sqrt(x ** 2 + y ** 2)
             if self.outer_r > r > self.inner_r:
-                return a,b,c
+                return x, y, h
             else:
-                return a,b,1
+                return x, y, 1
 
         point_coords = np.array(
             [update_z(x, y, z) for x_, y_, z_ in zip(Xmesh, Ymesh, self.surface)
@@ -90,7 +89,7 @@ class Spacer:
         :return: Generates defect in the spacer
         """
         if self.point_coo.empty:
-            self.get_point_co()
+            self.get_spacer_point_co()
         # Convert to meter
         r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
         if scratch_length < abs(r0 - r1):
@@ -105,8 +104,7 @@ class Spacer:
         x0, y0 = pol2cart(r0, np.radians(theta0))
         x1, y1 = pol2cart(r1, theta1)
 
-        rise = abs(y1 - y0)
-        run = abs(x1 - x0)
+        rise, run = abs(y1 - y0), abs(x1 - x0)
 
         if rise > scratch_length:
             run = rise
