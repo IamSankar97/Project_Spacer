@@ -7,6 +7,7 @@ sys.path.append('/home/mohanty/.local/lib/python3.10/site-packages/')
 from blendtorch import btb
 from PIL import Image
 
+
 class Blender:
     def __init__(self, point_coo: np.ndarray):
         self.mat = None
@@ -41,13 +42,13 @@ class Blender:
         ySize = len(self.vertices) // xSize
 
         #   Generate the polygons (four vertices linked in a face)
+
         polygons = []
         for i in range(1, len(self.vertices) - xSize):
-            if i % xSize != 0:
+            if i % xSize != 0 and self.vertices[i][2] != 1 and \
+                    self.vertices[i - 1][2] != 1 and self.vertices[i - 1 + xSize][2] != 1 and \
+                    self.vertices[i + xSize][2] != 1:
                 polygons.append((i, i - 1, i - 1 + xSize, i + xSize))
-
-        # polygons = [(i, i - 1, i - 1 + xSize, i + xSize) for i in range(1, len(self.vertices) - xSize) if
-        #             i % xSize != 0]
 
         mesh = bpy.data.meshes.new(mesh_name)  # Create the mesh (inner data)
         obj = bpy.data.objects.new(mesh_name, mesh)  # Create an object
@@ -58,7 +59,7 @@ class Blender:
                 p.use_smooth = True
 
         bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
-        # self.update_scene()
+        self.update_scene()
 
     def bool_intersect(self, obj1, obj2):
         bool_one = obj1.modifiers.new(type="BOOLEAN", name="bool 1")
