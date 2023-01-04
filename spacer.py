@@ -6,14 +6,14 @@ from utils import cart2pol, pol2cart, closest_number_, get_theta
 
 
 class Spacer:
-    def __init__(self, surface: np.ndarray, grid_spacing: float):
+    def __init__(self, surface: np.ndarray, grid_spacing: float, outer_radius=16, thickness=3.222):
         self.surface = surface
         self.grid_spacing = grid_spacing
         self.point_coo = pd.DataFrame()
         self.vertices = None
         self.spacer_coo = pd.DataFrame()
-        self.outer_radius = 16
-        self.inner_radius = 12.2
+        self.outer_r = outer_radius * 1e-3
+        self.inner_r = self.outer_r - (thickness * 1e-3)
 
     def get_point_co(self):
 
@@ -28,6 +28,48 @@ class Spacer:
              for x, y, z in zip(x_, y_, z_)])
 
         df_point_coords = pd.DataFrame(point_coords, dtype=np.float64)
+        df_point_coords.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
+        df_point_coords.sort_values(by=['X', 'Y'], inplace=True)
+        self.point_coo = df_point_coords
+
+    def get_spacer_point_co(self):
+        """
+
+        Parameters
+        ----------
+        r0: Spacer Inner radius in mm
+        r1: Spacer Outer radius in mm
+
+        Returns
+        -------
+        results vertices, by modifying point coordinates such that
+        """
+
+        # r0, r1 = r0 * 1e-3, r1 * 1e-3
+
+        end_l, end_r = int(-self.surface.shape[0] / 2), int(self.surface.shape[0] / 2)
+
+        X = np.array([i * self.grid_spacing for i in range(end_l, end_r)])
+        Y = X
+        Xmesh, Ymesh = np.meshgrid(X, Y)
+
+        x = 5
+        y = 10
+        max_value = x if x > y else y
+        print(max_value)  # prints 10
+
+        def update_z(a, b, c):
+            r = np.sqrt(a ** 2 + b ** 2)
+            if self.outer_r > r > self.inner_r:
+                return a,b,c
+            else:
+                return a,b,1
+
+        point_coords = np.array(
+            [update_z(x, y, z) for x_, y_, z_ in zip(Xmesh, Ymesh, self.surface)
+             for x, y, z in zip(x_, y_, z_)])
+
+        df_point_coords = pd.DataFrame(point_coords, dtype=np.float64)  # Saves 10 mili seconds
         df_point_coords.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
         df_point_coords.sort_values(by=['X', 'Y'], inplace=True)
         self.point_coo = df_point_coords
@@ -110,16 +152,6 @@ class Spacer:
         if return_theta:
             return np.degrees(theta1)
 
-    def filter_spacer_point_co(self, r0: float, r1: float):
-        point_co = self.point_coo.copy()
-
-        polar_co = np.array([cart2pol(row['X'], row['Y'])
-                             for index, row in self.point_coo.iterrows()])
-        point_co["r"], point_co['theta'] = polar_co[:, 0], polar_co[:, 1]
-
-        point_co_ = point_co.loc[(point_co["r"] <= r1) & (point_co["r"] >= r0)]
-        self.spacer_coo = point_co_[['X', 'Y', 'Z']]
-
     def randomize_defect(self, r0, r1, theta0, alpha=0.0,
                          beta=0.0, scratch_length: float = 0.0, defect_type: int = 0):
         """
@@ -143,7 +175,7 @@ class Spacer:
             number_of_defects = np.random.randint(1, 4)
             split_region = np.random.randint(3, 5)
             r2 = r1
-            r1, scratch_length1 = r0+((r2 - r0)*(split_region*0.1)), scratch_length * split_region * 0.1
+            r1, scratch_length1 = r0 + ((r2 - r0) * (split_region * 0.1)), scratch_length * split_region * 0.1
             scratch_length2 = scratch_length
             for i in range(number_of_defects):
                 if i == 0:
