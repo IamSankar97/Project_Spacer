@@ -3,7 +3,6 @@
 
 import sys
 import os
-
 sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/blendtorch')
 from spacer import Spacer
@@ -25,30 +24,27 @@ def get_sample_surface(folder):
 
 
 def main(addr_topology: str, addr_img_save: str):
-    start = time.time()
     count = 0
     for sample_surface, grid_spacing in get_sample_surface(addr_topology):
+        start = time.time()
         count += 1
         spacer = Spacer(sample_surface, grid_spacing)
-        spacer.get_point_co()
         ro, r1, theta0, defect_length, defect_type = \
             np.round(np.random.uniform(12.5, 13.2), 2), \
             np.round(np.random.uniform(13.8, 16), 2), \
             np.random.randint(1, 85), \
             np.round(np.random.uniform(2, 10), 2), \
-            count%2
-        spacer.randomize_defect(ro, r1, theta0, 70, 40, 4, defect_type)
+            count % 2
+        spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
+        global spacer_surf, blend
         if count == 1:
             blend = Blender(np.array(spacer.point_coo))
             objects = blend.get_objs()
             blend.set_scene_linear_unit('METERS')
             blend.generate_polygon('my_mesh')
             spacer_surf = objects['my_mesh']
-            cylinder = objects['Cylinder']
-            blend.bool_intersect(spacer_surf, cylinder)
             blend.assign_material(spacer_surf)
             blend.update_mat({'Roughness': 0, 'Metallic': 1})
-
             result_image = blend.render(file_path=addr_img_save, save=True, engine='CYCLES')
             end = time.time()
             print("Total time elapsed_ {}_st generation:".format(count), end - start)
@@ -56,7 +52,6 @@ def main(addr_topology: str, addr_img_save: str):
                               .format(cout=count, r0=ro, r1=r1, th=theta0, ln=defect_length, ty=defect_type))
 
         else:
-            start = time.time()
             blend.update_mesh_back_ground(np.array(spacer.point_coo), spacer_surf)
             #   blend.assign_material(spacer_surf)
             blend.update_mat({'Roughness': 0, 'Metallic': 1})
