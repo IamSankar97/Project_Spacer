@@ -36,6 +36,7 @@ def main(addr_topology: str, addr_img_save: str):
             np.round(np.random.uniform(2, 10), 2), \
             count % 2
         spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
+
         global spacer_surf, blend
         if count == 1:
             blend = Blender(np.array(spacer.point_coo))

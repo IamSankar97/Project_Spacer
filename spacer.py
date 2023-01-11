@@ -112,49 +112,29 @@ class Spacer:
 
         # This check is to choose whether to discritize along X direction or Y direction
         if rise > run:
-
-            df = self.point_coo.copy()
-            df['Y_grid'] = df['Y'].div(self.grid_spacing)
-            df['Y_grid'] = df['Y_grid'].round()
-            df['Y_grid'] = df['Y_grid'].astype(int)
-            try:
-                no_of_grids_y = int(np.round_(rise / self.grid_spacing))
-            except:
-                no_of_grids_y = 10
-            for i in range(no_of_grids_y):
-                y_sc_co = y0 + (i * self.grid_spacing)  # Scratch coordinate y
-                x_sc_co = ((y_sc_co - y0) / slope_scratch) + x0  # Scratch coordinate x
-                y_sc_co_grid = np.round_(y_sc_co / self.grid_spacing)  # Scratch coordinate y's grid point
-                df_ = df[df.loc[:, "Y_grid"] == y_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
-                try:
-                    x_sc_co_actual, index = closest_number_(df_, x_sc_co,
-                                                            "X")  # Filtering out x points where ygrid id y's grid point
-                    if self.point_coo["Z"][index] != 1:
-                        self.point_coo["Z"][index] -= h_defect
-                except:
-                    pass
-
+            discretize, find_coo = 'X', 'Y'
         else:
-            df = self.point_coo.copy()
-            df['X_grid'] = df['X'].div(self.grid_spacing)
-            df['X_grid'] = df['X_grid'].round()
-            df['X_grid'] = df['X_grid'].astype(int)
+            discretize, find_coo = 'Y', 'X'
+        df = self.point_coo.copy()
+        df[discretize+'_grid'] = df[discretize].div(self.grid_spacing)
+        df[discretize+'_grid'] = df[discretize+'_grid'].round()
+        df[discretize+'_grid'] = df[discretize+'_grid'].astype(int)
+        try:
+            no_of_grids_x = int(np.round_(rise / self.grid_spacing))
+        except:
+            no_of_grids_x = 10
+        for i in range(no_of_grids_x):
+            x_sc_co = x0 + (i * self.grid_spacing)  # Scratch coordinate x
+            y_sc_co = (abs(x_sc_co - x0) * slope_scratch) + y0  # Scratch coordinate y
+            x_sc_co_grid = np.round_(x_sc_co / self.grid_spacing)  # Scratch coordinate y's grid point
+            df_ = df[df.loc[:, discretize+'_grid'] == x_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
             try:
-                no_of_grids_x = int(np.round_(rise / self.grid_spacing))
+                x_sc_co_actual, index = closest_number_(df_, y_sc_co,
+                                                        find_coo)  # Filtering out x points where ygrid id y's grid point
+                if self.point_coo["Z"][index] != 1:
+                    self.point_coo["Z"][index] -= h_defect
             except:
-                no_of_grids_x = 10
-            for i in range(no_of_grids_x):
-                x_sc_co = x0 + (i * self.grid_spacing)  # Scratch coordinate x
-                y_sc_co = (abs(x_sc_co - x0) * slope_scratch) + y0  # Scratch coordinate y
-                x_sc_co_grid = np.round_(x_sc_co / self.grid_spacing)  # Scratch coordinate y's grid point
-                df_ = df[df.loc[:, "X_grid"] == x_sc_co_grid]  # Filtering out x points where ygrid id y's grid point
-                try:
-                    x_sc_co_actual, index = closest_number_(df_, y_sc_co,
-                                                            "Y")  # Filtering out x points where ygrid id y's grid point
-                    if self.point_coo["Z"][index] != 1:
-                        self.point_coo["Z"][index] -= h_defect
-                except:
-                    pass
+                pass
         if return_theta:
             return np.degrees(theta1)
 
