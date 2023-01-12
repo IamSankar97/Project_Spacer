@@ -12,7 +12,12 @@ def get_theta(r1, r2, theta0, distance):
     :param distance: micrometer
     :return: radian
     """
-    theta1 = np.arccos((r1 ** 2 + (r2 ** 2) - (distance ** 2)) / (2 * r1 * r2)) + np.radians(theta0)
+    m = (r1 ** 2 + (r2 ** 2) - (distance ** 2)) / (2 * r1 * r2)
+    if m > 1:
+        m = 1
+    elif m < -1:
+        m = -1
+    theta1 = np.arccos(m) + np.radians(theta0)
     return theta1
 
 
@@ -57,4 +62,4 @@ def pol2cart(rho, phi):
     """
     x = rho * np.cos(phi)
     y = rho * np.sin(phi)
-    return (x, y)
+    return x, y
