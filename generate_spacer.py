@@ -1,5 +1,5 @@
-# import pydevd_pycharm
-# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+import pydevd_pycharm
+pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import sys
 import os
@@ -42,7 +42,8 @@ def main(addr_topology: str, addr_img_save: str):
     for spacer, ro, r1, theta0, defect_length, defect_type in get_sample_surface(addr_topology):
         count += 1
         if count == 1:
-            blend = Blender(np.array(spacer.point_coo))
+            point_coordinates = spacer.point_coo[['X', 'Y', 'Z']]
+            blend = Blender(np.array(point_coordinates))
             objects = blend.get_objs()
             blend.set_scene_linear_unit('METERS')
             blend.generate_polygon('my_mesh')
