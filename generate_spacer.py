@@ -1,5 +1,5 @@
-import pydevd_pycharm
-pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+# import pydevd_pycharm
+# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
 import sys
 import os
@@ -28,7 +28,7 @@ def get_sample_surface(folder):
                         np.round(np.random.uniform(12.5, 13.2), 2), \
                         np.round(np.random.uniform(13.8, 16), 2), \
                         np.random.randint(1, 85), \
-                        np.round(np.random.uniform(2, 7), 2), \
+                        np.round(np.random.uniform(2, 10), 2), \
                         count % 2
                     spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
 
