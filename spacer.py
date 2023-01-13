@@ -37,6 +37,9 @@ class Spacer:
         df_point_coords = pd.DataFrame(point_coords, dtype=np.float64)
         df_point_coords.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
         df_point_coords.sort_values(by=['X', 'Y'], inplace=True)
+        df_point_coords['X_grid'] = df_point_coords['X'].div(self.grid_spacing).round().astype(int)
+        df_point_coords['Y_grid'] = df_point_coords['Y'].div(self.grid_spacing).round().astype(int)
+
         self.point_coo = df_point_coords
 
     def get_spacer_point_co(self):
@@ -82,6 +85,8 @@ class Spacer:
         df_point_coords = pd.DataFrame(point_coords, dtype=np.float64)  # Saves 10 mili seconds
         df_point_coords.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
         df_point_coords.sort_values(by=['X', 'Y'], inplace=True)
+        df_point_coords['X_grid'] = df_point_coords['X'].div(self.grid_spacing).round().astype(int)
+        df_point_coords['Y_grid'] = df_point_coords['Y'].div(self.grid_spacing).round().astype(int)
         self.point_coo = df_point_coords
 
     def update_defect_height(self, row):
@@ -96,7 +101,10 @@ class Spacer:
         point coordinate by updating itz z value t0 defect
         """
         global independent, dependent_actual
-        df = self.point_coo.copy()
+        # df = self.point_coo
+        # df['X_grid'] = df['X'].div(self.grid_spacing).round().astype(int)
+        # df['Y_grid'] = df['Y'].div(self.grid_spacing).round().astype(int)
+
         index_defect = []
         for i in range(row['no_of_grids']):
             independent = row[row['discretize'] + '0'] + (i * self.grid_spacing)
@@ -109,11 +117,11 @@ class Spacer:
                 dependent = (abs(independent - row[row['discretize'] + '0']) / row['slope']) + row[
                     row['find_coo'] + '0']
             independent_grid = np.round_(independent / self.grid_spacing)
-            df_ = df[df.loc[:, row['discretize'] + '_grid'] == independent_grid]
+            df_ = self.point_coo[self.point_coo.loc[:, row['discretize'] + '_grid'] == independent_grid]
             try:
                 dependent_actual, index = closest_number_(df_, dependent, row['find_coo'])
-                if self.point_coo["Z"][index] != 1:
-                    self.point_coo["Z"][index] -= self.h_defect
+                if self.point_coo.at[index, "Z"] != 1:
+                    self.point_coo.at[index, "Z"] -= self.h_defect
                     index_defect.append(index)
             except:
                 pass
@@ -201,7 +209,7 @@ class Spacer:
             defect_end_co.append(self.update_defect_height(row))
 
         if return_def_end_co:
-            return np.array(defect_end_co)  # np.degrees(defect_geometry['theta1'])
+            return np.array(defect_end_co)
 
     def randomize_defect(self, r0, r1, theta0, alpha=0.0,
                          beta=0.0, scratch_length: float = 0.0, defect_type: int = 0):
