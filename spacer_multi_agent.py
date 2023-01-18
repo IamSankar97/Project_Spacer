@@ -85,14 +85,15 @@ class Penv(gym.Env):
 
 
 def main():
-    Py_env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 3)])
+    Py_env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 2)])
     obs = Py_env.reset()
-    # for i in range(100):
-    #     print("iteration-----------:", i)
-    #     obs_ = Py_env.step(np.array([[1], [1]]))
-    #     # if done:
-    #     #     print("iteration-----------:", i, "reset")
-    #     #     Py_env.reset()
+    for i in range(100):
+        print("iteration-----------:", i)
+        obs_ = Py_env.step(np.array([[1],
+                                     [1]]))
+        # if done:
+        #     print("iteration-----------:", i, "reset")
+        #     Py_env.reset()
 
     print("# Learning")
     model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
