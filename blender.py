@@ -100,6 +100,19 @@ class Blender:
 
     def render(self, file_path: str, resolution: tuple = (2448, 2048), save: bool = True,
                engine: str = 'CYCLES'):
+        """
+
+        Parameters
+        ----------
+        file_path: File where render image to be saved
+        resolution: Pixel resolution
+        save: To save the image
+        engine: rendering engine CYCLES
+
+        Returns
+        -------
+
+        """
 
         if engine == "CYCLES":
             # Set the rendering engine to Cycles

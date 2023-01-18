@@ -3,6 +3,8 @@ import time
 import gym
 import numpy as np
 import os
+import sys
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
 from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -68,17 +70,18 @@ class TrainAndLoggingCallback(BaseCallback):
 def main():
 
     env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 2)])
-    env = VecMonitor(env, LOG_DIR)
+    # env = VecMonitor(env, LOG_DIR)
     # env = gym.make(env_id, address=0, real_time=False)
     # env = Monitor(env)
+    print("resetting-----------")
     obs = env.reset()
-    #
-    # for i in range(100):
-    #
-    #     obs, reward, done, _ = env.step(np.array([1]))
-    #     if done:
-    #         env.reset()
-    #     print(obs, reward, done)
+    for i in range(100):
+        print("iteration-----------:", i)
+        obs, reward, done, _ = env.step(np.array([1]))
+        if done:
+            print("iteration-----------:", i, "reset")
+            env.reset()
+
 
     model = A2C('MlpPolicy', env, verbose=1, n_steps=1500, learning_rate=0.0001)
 

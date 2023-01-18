@@ -4,6 +4,9 @@ from blendtorch import btt
 import random
 import numpy as np
 from gym.utils import seeding
+import sys
+import os
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 
 
 class SpacerEnv(btt.env.OpenAIRemoteEnv):
@@ -11,16 +14,16 @@ class SpacerEnv(btt.env.OpenAIRemoteEnv):
         super().__init__(version="0.0.1")
         self.np_random = None
         self.launch(
-            scene=Path(__file__).parent / "Steel_Defect.blend",
-            script=Path(__file__).parent / "cartpole.blend.py",
+            scene=Path(__file__).parent / "spacer.blend",
+            script=Path(__file__).parent / "spacer.blend.py",
             real_time=real_time,
             render_every=render_every,
             address=address
         )
 
-        self.up_limit = 190.0
-        self.lw_limit = 170.0
-        self.action_space = self.action_space = spaces.Discrete(2)
+        self.up_limit = 60
+        self.lw_limit = 40
+        self.action_space = spaces.Discrete(2)
         self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
                                             dtype=np.float32)
         self.seed()
