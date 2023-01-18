@@ -1,13 +1,11 @@
+# Use below only during debugging
+# import pydevd_pycharm
+# pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+
 import sys
 import os
-
-# Use below only during debugging
-import pydevd_pycharm
-pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
-
 sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
-
 import bpy
 import bmesh
 import numpy as np
@@ -129,7 +127,7 @@ class SpacerEnv(btb.env.BaseEnv):
         global r_
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-        # off.set_render_style(shading='RENDERED', overlays=False)
+        off.set_render_style(shading='RENDERED', overlays=False)
         image = off.render()
         self.state = np.average(image[:, :, 0:3])
         # global r_
@@ -140,12 +138,8 @@ class SpacerEnv(btb.env.BaseEnv):
 
         # Check if shower is done
 
-        if 24 >self.state > 31:
-            done = True     # Env resets
-        else:
-            done = False    # Env Continues
-        # done = bool(24 > abs(self.state) > 31)  # or self.episode_length <= 0)
-        # done = False
+        # done = True if 24 > self.state > 31 else done = False
+        done = False
         if not done:
             r_ = 1.0
         elif self.steps_beyond_done is None:
@@ -154,7 +148,7 @@ class SpacerEnv(btb.env.BaseEnv):
             r_ = 1.0
 
         print("post_step-----",self.state, image[:, :, 0:3].shape, done, r_)
-        return dict(obs=self.state, reward=r_, done=done)
+        return dict(obs=[self.state], reward=r_, done=done)
 
     def _action(self, action):
         if action == 0:

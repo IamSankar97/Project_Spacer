@@ -1,9 +1,10 @@
 import time
-
 import gym
+from gym import spaces
 import numpy as np
 import os
 import sys
+
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
 from stable_baselines3 import A2C
@@ -45,7 +46,7 @@ def make_env(env_id: str, rank: int, seed: int = 0) -> Callable:
 
 
 env_id = "blendtorch-spacer-v2"
-num_cpu = 5 # Number of processes to use
+num_cpu = 5  # Number of processes to use
 
 
 class TrainAndLoggingCallback(BaseCallback):
@@ -67,23 +68,34 @@ class TrainAndLoggingCallback(BaseCallback):
         return True
 
 
+class Penv(gym.Env):
+    def __init__(self, SubprocVecEnv_):
+        self.environments = SubprocVecEnv_
+        self.up_limit = 60
+        self.lw_limit = 40
+        self.action_space = spaces.Discrete(2)
+        self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
+                                            dtype=np.float32)
+
+    def reset(self):
+        return self.environments.reset()
+
+    def step(self, action):
+        return self.environments.step(action)
+
+
 def main():
+    Py_env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 3)])
+    obs = Py_env.reset()
+    # for i in range(100):
+    #     print("iteration-----------:", i)
+    #     obs_ = Py_env.step(np.array([[1], [1]]))
+    #     # if done:
+    #     #     print("iteration-----------:", i, "reset")
+    #     #     Py_env.reset()
 
-    env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 2)])
-    # env = VecMonitor(env, LOG_DIR)
-    # env = gym.make(env_id, address=0, real_time=False)
-    # env = Monitor(env)
-    print("resetting-----------")
-    obs = env.reset()
-    for i in range(100):
-        print("iteration-----------:", i)
-        obs, reward, done, _ = env.step(np.array([1]))
-        if done:
-            print("iteration-----------:", i, "reset")
-            env.reset()
-
-
-    model = A2C('MlpPolicy', env, verbose=1, n_steps=1500, learning_rate=0.0001)
+    print("# Learning")
+    model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
@@ -106,7 +118,7 @@ def main():
         total_reward = 0
         while not done:
             action, _ = model.predict(obs)
-            obs, reward, done, info = env.step(np.array([action]))
+            obs, reward, done, info = Py_env.step(np.array([action]))
             time.sleep(0.2)
             total_reward += reward
         print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
