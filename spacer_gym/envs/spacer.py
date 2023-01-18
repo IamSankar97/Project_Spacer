@@ -221,7 +221,7 @@ class Spacer:
         -------
         Topology with defect
         """
-        number_of_defects = np.random.choice(np.arange(3, 10, 2), size=np.random.randint(1, 5), replace=False)
+        number_of_defects = np.random.choice(np.arange(3, 10, 2), size=np.random.randint(1, 3), replace=False)
         theta_set = number_of_defects + theta0
         if defect_type == 0:
             self.generate_defect(r0=r0, r1=r1, theta0_set=theta_set, alpha=alpha,

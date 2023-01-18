@@ -87,7 +87,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self._action(action)
         spacer, ro, r1, theta0, defect_length, defect_type = \
             self.get_sample_surface('/home/mohanty/PycharmProjects/Project_Spacer/topology/pkl_5/')
-        print('prepare_step-----')
         self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
         self.episode_length -= 1
 
@@ -106,7 +105,6 @@ class SpacerEnv(btb.env.BaseEnv):
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
         image = off.render()
         self.state = np.average(image[:, :, 0:3])
-        # global r_
 
         # Check if shower is done
         # done = True if 24 > self.state > 31 else done = False

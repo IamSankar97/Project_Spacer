@@ -85,47 +85,56 @@ class Penv(gym.Env):
 
 
 def main():
-    Py_env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 2)])
+    Py_env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 4)])
     obs = Py_env.reset()
-    for i in range(100):
-        print("iteration-----------:", i)
+    time_total = 0
+    for i in range(20):
+        start = time.time()
         obs_ = Py_env.step(np.array([[1],
+                                     [1],
                                      [1]]))
+        time_one_iter = time.time() - start
+        time_total += time_one_iter
+        print("timetaken_iter{}:".format(i), time_one_iter)
+
+    print('total time over_ 2 iteration: ', time_total/20)
         # if done:
         #     print("iteration-----------:", i, "reset")
         #     Py_env.reset()
 
     print("# Learning")
-    model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
 
-    callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
-
-    start_time = time.time()
-    new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
-    model.set_logger(new_logger)
-    total_time_step = 100000
-    # Multiprocessed RL Training
-    model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
-
-    total_time_multi = time.time() - start_time
-
-    print(f"Took {total_time_multi:.2f}s for multiprocessed version - {total_time_step / total_time_multi:.2f} FPS")
-
-    # Evaluate the trained agent
-    env_val = gym.make("env_id", address=num_cpu + 2, real_time=False)
-    for episode in range(10):
-        obs = env_val.reset()
-        done = False
-        total_reward = 0
-        while not done:
-            action, _ = model.predict(obs)
-            obs, reward, done, info = Py_env.step(np.array([action]))
-            time.sleep(0.2)
-            total_reward += reward
-        print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
-
-    # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
-    # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
+    #
+    # model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
+    #
+    # callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
+    #
+    # start_time = time.time()
+    # new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
+    # model.set_logger(new_logger)
+    # total_time_step = 100000
+    # # Multiprocessed RL Training
+    # model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
+    #
+    # total_time_multi = time.time() - start_time
+    #
+    # print(f"Took {total_time_multi:.2f}s for multiprocessed version - {total_time_step / total_time_multi:.2f} FPS")
+    #
+    # # Evaluate the trained agent
+    # env_val = gym.make("env_id", address=num_cpu + 2, real_time=False)
+    # for episode in range(10):
+    #     obs = env_val.reset()
+    #     done = False
+    #     total_reward = 0
+    #     while not done:
+    #         action, _ = model.predict(obs)
+    #         obs, reward, done, info = Py_env.step(np.array([action]))
+    #         time.sleep(0.2)
+    #         total_reward += reward
+    #     print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
+    #
+    # # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
+    # # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
 
 
 if __name__ == '__main__':
