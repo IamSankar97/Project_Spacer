@@ -1,6 +1,4 @@
 import time
-from abc import ABC
-
 import gym
 from gym import spaces
 import numpy as np
@@ -55,12 +53,18 @@ class Penv(gym.Env):
         self.action_space = spaces.Discrete(2)
         self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
                                             dtype=np.float32)
+        self.state = 25
 
     def reset(self):
-        return self.environments.reset()
+        obs_ = self.environments.reset()
+        self.state = [np.average(pickle.loads(obs_))]
+        return self.state
 
     def step(self, action):
-        return self.environments.step(action)
+        obs_ = self.environments.step([action])
+        # return self.environments.step([action])
+        self.state, reward, done, info = [np.average(pickle.loads(obs_[0]))], obs_[1], obs_[2], obs_[3]
+        return self.state, reward, done, info
 
 
 def main():
