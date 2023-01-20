@@ -1,9 +1,13 @@
 import time
+from abc import ABC
 
 import gym
+from gym import spaces
 import numpy as np
 import os
 import sys
+import pickle
+
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
 from stable_baselines3 import A2C
@@ -23,12 +27,11 @@ os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
-def make_env(env_id: str, rank: int, seed: int = 0) -> Callable:
+def make_env_fun(env_id: str, rank: int, seed: int = 0) -> Callable:
     """
     Utility function for multiprocessed env.
 
     :param env_id: (str) the environment ID
-    :param num_env: (int) the number of environment you wish to have in subprocesses
     :param seed: (int) the inital seed for RNG
     :param rank: (int) index of the subprocess
     :return: (Callable)
@@ -45,7 +48,7 @@ def make_env(env_id: str, rank: int, seed: int = 0) -> Callable:
 
 
 env_id = "blendtorch-spacer-v2"
-num_cpu = 5 # Number of processes to use
+num_cpu = 5  # Number of processes to use
 
 
 class TrainAndLoggingCallback(BaseCallback):
@@ -67,23 +70,48 @@ class TrainAndLoggingCallback(BaseCallback):
         return True
 
 
+class Penv(gym.Env):
+    def __init__(self, add):
+        self.env_id = "blendtorch-spacer-v2"
+        self.address = add
+        self.environments = gym.make(self.env_id, address = self.address,  real_time=False)
+        self.up_limit = 60
+        self.lw_limit = 40
+        self.action_space = spaces.Discrete(2)
+        self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
+                                            dtype=np.float32)
+
+
+    def reset(self):
+        return self.environments.reset()
+
+    def step(self, action):
+        return self.environments.step(action)
+
+
 def main():
+    def make_env(address):
+        return lambda: Penv(address)
 
-    env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 2)])
-    # env = VecMonitor(env, LOG_DIR)
-    # env = gym.make(env_id, address=0, real_time=False)
-    # env = Monitor(env)
-    print("resetting-----------")
-    obs = env.reset()
-    for i in range(100):
-        print("iteration-----------:", i)
-        obs, reward, done, _ = env.step(np.array([1]))
-        if done:
-            print("iteration-----------:", i, "reset")
-            env.reset()
+    addresses = [5, 6]
+    Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
+    # Py_env = Penv(env)
+    # obs = Py_env.reset()
+    # time_total = 0
+    # for i in range(2):
+    #     start = time.time()
+    #     obs_ = Py_env.step(np.array([[1],
+    #                                  [1]]))
+    #     time_one_iter = time.time() - start
+    #     time_total += time_one_iter
+    #     print("timetaken_iter{}:".format(i), time_one_iter)
 
-    model = A2C('MlpPolicy', env, verbose=1, n_steps=1500, learning_rate=0.0001)
+    # print('total time over_ 2 iteration: ', time_total/20)
+
+    print("# Learning")
+    #
+    model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
@@ -93,26 +121,26 @@ def main():
     total_time_step = 100000
     # Multiprocessed RL Training
     model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
-
-    total_time_multi = time.time() - start_time
-
-    print(f"Took {total_time_multi:.2f}s for multiprocessed version - {total_time_step / total_time_multi:.2f} FPS")
-
-    # Evaluate the trained agent
-    env_val = gym.make("env_id", address=num_cpu + 2, real_time=False)
-    for episode in range(10):
-        obs = env_val.reset()
-        done = False
-        total_reward = 0
-        while not done:
-            action, _ = model.predict(obs)
-            obs, reward, done, info = env.step(np.array([action]))
-            time.sleep(0.2)
-            total_reward += reward
-        print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
-
-    # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
-    # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
+    #
+    # total_time_multi = time.time() - start_time
+    #
+    # print(f"Took {total_time_multi:.2f}s for multiprocessed version - {total_time_step / total_time_multi:.2f} FPS")
+    #
+    # # Evaluate the trained agent
+    # env_val = gym.make("env_id", address=num_cpu + 2, real_time=False)
+    # for episode in range(10):
+    #     obs = env_val.reset()
+    #     done = False
+    #     total_reward = 0
+    #     while not done:
+    #         action, _ = model.predict(obs)
+    #         obs, reward, done, info = Py_env.step(np.array([action]))
+    #         time.sleep(0.2)
+    #         total_reward += reward
+    #     print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
+    #
+    # # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
+    # # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
 
 
 if __name__ == '__main__':
