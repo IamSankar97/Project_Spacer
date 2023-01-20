@@ -1,9 +1,12 @@
 import time
+from abc import ABC
+
 import gym
 from gym import spaces
 import numpy as np
 import os
 import sys
+import pickle
 
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
@@ -44,8 +47,9 @@ class TrainAndLoggingCallback(BaseCallback):
 
 
 class Penv(gym.Env):
-    def __init__(self, SubprocVecEnv_):
-        self.environments = SubprocVecEnv_
+    def __init__(self, add):
+        self.env_id = "blendtorch-spacer-v2"
+        self.environments = gym.make(self.env_id, address = add,  real_time=False)
         self.up_limit = 60
         self.lw_limit = 40
         self.action_space = spaces.Discrete(2)
@@ -60,36 +64,38 @@ class Penv(gym.Env):
 
 
 def main():
-    Py_env = SubprocVecEnv([make_env(env_id, i) for i in range(1, 4)])
-    obs = Py_env.reset()
-    time_total = 0
-    for i in range(20):
-        start = time.time()
-        obs_ = Py_env.step(np.array([[1],
-                                     [1],
-                                     [1]]))
-        time_one_iter = time.time() - start
-        time_total += time_one_iter
-        print("timetaken_iter{}:".format(i), time_one_iter)
+    def make_env(address):
+        return lambda: Penv(address)
 
-    print('total time over_ 2 iteration: ', time_total/20)
-        # if done:
-        #     print("iteration-----------:", i, "reset")
-        #     Py_env.reset()
+    n_envs = 2 # Number of parallel environments
+    addresses = [5, 6]
+    Py_env = SubprocVecEnv([make_env(address) for address in addresses])
+
+    # Py_env = Penv(env)
+    # obs = Py_env.reset()
+    # time_total = 0
+    # for i in range(2):
+    #     start = time.time()
+    #     obs_ = Py_env.step(np.array([[1],
+    #                                  [1]]))
+    #     time_one_iter = time.time() - start
+    #     time_total += time_one_iter
+    #     print("timetaken_iter{}:".format(i), time_one_iter)
+
+    # print('total time over_ 2 iteration: ', time_total/20)
 
     print("# Learning")
+    #
+    model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
 
-    #
-    # model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
-    #
-    # callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
-    #
-    # start_time = time.time()
-    # new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
-    # model.set_logger(new_logger)
-    # total_time_step = 100000
-    # # Multiprocessed RL Training
-    # model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
+    callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
+
+    start_time = time.time()
+    new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
+    model.set_logger(new_logger)
+    total_time_step = 100000
+    # Multiprocessed RL Training
+    model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
     #
     # total_time_multi = time.time() - start_time
     #
