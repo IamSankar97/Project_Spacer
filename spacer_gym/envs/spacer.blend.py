@@ -104,7 +104,8 @@ class SpacerEnv(btb.env.BaseEnv):
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
         image = off.render()
-        self.state = np.average(image[:, :, 0:3])
+        # self.state = np.average(image[:, :, 0:3])
+        self.state = pickle.dumps(image[:, :, 0:3])
 
         # Check if shower is done
         # done = True if 24 > self.state > 31 else done = False
@@ -116,14 +117,9 @@ class SpacerEnv(btb.env.BaseEnv):
             self.steps_beyond_done = 0
             r_ = 1.0
 
-        return dict(obs=[self.state], reward=r_, done=done)
+        return dict(obs=self.state, reward=r_, done=done)
 
     def _action(self, action):
-        if action == 0:
-            delta = self.normalize_(abs(self.state - self.avg_pixel))
-        else:
-            delta = -self.normalize_(abs(self.state - self.avg_pixel))
-
         self.light.data.energy += 0
 
     def normalize_(self, state_v):
