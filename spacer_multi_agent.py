@@ -24,31 +24,6 @@ os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
-def make_env(env_id: str, rank: int, seed: int = 0) -> Callable:
-    """
-    Utility function for multiprocessed env.
-
-    :param env_id: (str) the environment ID
-    :param num_env: (int) the number of environment you wish to have in subprocesses
-    :param seed: (int) the inital seed for RNG
-    :param rank: (int) index of the subprocess
-    :return: (Callable)
-    """
-
-    def _init() -> gym.Env:
-        env = gym.make(env_id, address=rank, real_time=False)
-        env.seed(seed + rank)
-        # check_env(env)
-        return env
-
-    set_random_seed(seed)
-    return _init
-
-
-env_id = "blendtorch-spacer-v2"
-num_cpu = 5  # Number of processes to use
-
-
 class TrainAndLoggingCallback(BaseCallback):
 
     def __init__(self, check_freq, save_path, verbose=1):
