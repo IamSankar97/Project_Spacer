@@ -40,6 +40,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.np_random = None
         self.state = 40
         self.steps_beyond_done = None
+        self.topology_dir = '/home/mohanty/PycharmProjects/Project_Spacer/topology/pkl_5/'
+        self.topologies = os.listdir(self.topology_dir)
 
     def update_scene(self):
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
@@ -63,14 +65,12 @@ class SpacerEnv(btb.env.BaseEnv):
         bm.free()
         self.update_scene()  # Updates the mesh in scene by refreshing the screen
 
-    def get_sample_surface(self, folder):
-        filenames = os.listdir(folder)
-        filename = random.choice(filenames)
+    def get_sample_surface(self):
+        filename = random.choice(self.topologies)
         if filename.endswith('.pkl'):
-            with open(os.path.join(folder, filename), 'rb') as f:
+            with open(os.path.join(self.topology_dir, filename), 'rb') as f:
                 my_realisation = pickle.load(f) * 1e-6
-                grid_spacing = my_realisation[0][0]
-                sample_surface = np.array(my_realisation[1:, :])
+                grid_spacing, sample_surface = my_realisation[0][0], np.array(my_realisation[1:, :])
 
                 spacer = Spacer(sample_surface, grid_spacing)
                 ro, r1, theta0, defect_length, defect_type = \
@@ -86,7 +86,7 @@ class SpacerEnv(btb.env.BaseEnv):
     def _env_prepare_step(self, action: np.ndarray):
         self._action(action)
         spacer, ro, r1, theta0, defect_length, defect_type = \
-            self.get_sample_surface('/home/mohanty/PycharmProjects/Project_Spacer/topology/pkl_5/')
+            self.get_sample_surface()
         self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
         self.episode_length -= 1
 
@@ -104,18 +104,11 @@ class SpacerEnv(btb.env.BaseEnv):
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
         image = off.render()
-        # self.state = np.average(image[:, :, 0:3])
-        self.state = pickle.dumps(image[:, :, 0:3])
 
-        # Check if shower is done
+        self.state = image
+        # Check if shower is done based on number of episodes need to modigy this code
         # done = True if 24 > self.state > 31 else done = False
-        done = False
-        if not done:
-            r_ = 1.0
-        elif self.steps_beyond_done is None:
-            # Pole just fell!
-            self.steps_beyond_done = 0
-            r_ = 1.0
+        done, r_ = False, 1
 
         return dict(obs=self.state, reward=r_, done=done)
 
