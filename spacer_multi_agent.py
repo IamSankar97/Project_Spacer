@@ -10,6 +10,9 @@ from PIL import Image
 
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
@@ -46,6 +49,131 @@ class TrainAndLoggingCallback(BaseCallback):
         return True
 
 
+discriminator = nn.Sequential(
+    # in: 1 x 256 x 256
+    nn.Conv2d(1, 256, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(256),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 256 x 128 x 128
+
+    nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(512),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 512 x 64 x 64
+
+    nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(1024),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 1024 x 32 x 32
+
+    nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(2048),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 2048 x 16 x 16
+
+    nn.Conv2d(2048, 4096, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(4096),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 4096 x 8 x 8
+
+    nn.Conv2d(4096, 1, kernel_size=8, stride=1, padding=0, bias=False),
+    # out: 1 x 1 x 1
+
+    nn.Flatten(),
+    nn.Sigmoid())
+
+
+def get_default_device():
+    """Pick GPU if available, else CPU"""
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    else:
+        return torch.device('cpu')
+
+
+def to_device(data, device):
+    """Move tensor(s) to chosen device"""
+    if isinstance(data, (list, tuple)):
+        return [to_device(x, device) for x in data]
+    return data.to(device, non_blocking=True)
+
+
+class DeviceDataLoader():
+    """Wrap a dataloader to move data to a device"""
+
+    def __init__(self, dl, device):
+        self.dl = dl
+        self.device = device
+
+    def __iter__(self):
+        """Yield a batch of data after moving it to device"""
+        for b in self.dl:
+            yield to_device(b, self.device)
+
+    def __len__(self):
+        """Number of batches"""
+        return len(self.dl)
+
+
+device = get_default_device()
+discriminator = to_device(discriminator, device)
+opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
+
+
+def train_discriminator(real_images, fake_images, opt_d):
+    # real_images = to_device(real_images, device)
+    # fake_images = to_device(fake_images, device)
+    # Clear discriminator gradients
+    opt_d.zero_grad()
+
+    # Pass real images through discriminator
+    real_images = real_images.float()
+    fake_images = fake_images.float()
+
+    real_preds = discriminator(real_images)
+    real_targets = torch.ones(4, 1, device=device)
+    real_loss = F.binary_cross_entropy(real_preds, real_targets)
+    real_score = torch.mean(real_preds).item()
+
+    # Generate fake images
+
+    # Pass fake images through discriminator
+    fake_targets = torch.zeros(4, 1, device=device)
+    fake_preds = discriminator(fake_images)
+    fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
+    fake_score = torch.mean(fake_preds).item()
+
+    # Update discriminator weights
+    loss = real_loss + fake_loss
+    loss.backward()
+    opt_d.step()
+    return loss.item(), real_score, fake_score
+
+
+def get_trainable_data(image, assign_device):
+    # ------ This is where Discriminator will be placed. ------ #
+    crop_images = [torch.from_numpy(np.array([image[i: i + 256, j: j + 256]])) for i in range(0, 512, 256) for j in
+                   range(0, 512, 256)]
+    crop_images = torch.stack(crop_images)
+    crop_images = crop_images.float()
+    # spacer_act_y = np.ones(len(spacer_act_x))
+
+    # spacer_fake = [torch.from_numpy(np.array([fake_spacer[i: i + 256, j: j + 256]])) for i in range(0, 512, 256) for j in range(0, 512, 256)]
+    # spacer_fake_x = torch.stack(spacer_fake)
+    # spacer_fake_x = spacer_fake_x.float()
+
+    # spacer_fake_y = np.zeros(len(spacer_fake_x))
+    # spacer_x, spacer_y = spacer_act_x + spacer_fake_x, spacer_act_y + spacer_fake_y
+    return to_device(crop_images, assign_device)
+
+
+def binary_accuracy(y_pred, y_true):
+    y_pred_label = (y_pred > 0.5).long()  # round off the predicted probability to the nearest label (0 or 1)
+    correct = torch.eq(y_pred_label, y_true)
+    acc = torch.mean(correct.float())
+    return acc
+
+
 class Penv(gym.Env):
     def __init__(self, add):
         self.env_id = "blendtorch-spacer-v2"
@@ -57,57 +185,61 @@ class Penv(gym.Env):
                                             dtype=np.float32)
         self.state = [25]
         self.reward = 0
-        self.spacer_data_dir = '/home/mohanty/PycharmProjects/Project_Spacer/spacer_data/train/'
+        self.spacer_data_dir = 'spacer_data/train/'
         self.spacer_data = os.listdir(self.spacer_data_dir)
+        self.image_size = (512, 512)
 
     def get_actual_sp(self):
         filename = random.choice(self.spacer_data)
         if filename.endswith('.png'):
             actual_spacer = Image.open(os.path.join(self.spacer_data_dir, filename))
-            return np.asarray(actual_spacer)
-
-    def get_reward(self, actual_spacer):
-        # ------ This is where Discriminator will be placed.#----
-        obs_fake, obs_actual = np.average(self.state[0]), np.average(actual_spacer)
-        return [obs_fake] if obs_fake > obs_actual else [obs_actual]
+            # actual_spacer.show()
+            return actual_spacer
 
     def reset(self):
         obs_ = self.environments.reset()
-        self.state = [np.average(np.asarray(obs_))]
+        self.state = np.asarray(obs_)
         return self.state
 
     def step(self, action):
         obs_ = self.environments.step([action])
-        self.state, reward, done, info = [np.asarray(obs_[0])], obs_[1], obs_[2], obs_[3]
-        spacer_act = self.get_actual_sp()
-        # Below is assigned to state, in future it has to be assigned to reward.
-        self.state = self.get_reward(spacer_act)
-        return self.state, reward, done, info
+        self.state, reward, done, info = [np.asarray(obs_[0], dtype=np.float64) * 255], obs_[1], obs_[2], obs_[3]
+        real_spacer = self.get_actual_sp()
+        real_spacer = np.asarray(real_spacer.resize(self.image_size), dtype=np.float64) * 255
+        fake_spacer = self.state[0]
+        actual, fake = get_trainable_data(real_spacer, device), get_trainable_data(fake_spacer, device)
+        loss, real_score, fake_score = train_discriminator(actual, fake, opt_d)
+
+        # Try to fool the discriminator
+        preds = discriminator(fake)
+        targets = torch.ones(4, 1, device=device)
+        reward = binary_accuracy(preds, targets)
+        reward = reward.cpu().numpy()
+        return self.state, [reward], done, info
 
 
 def main():
     def make_env(address):
         return lambda: Penv(address)
 
-    addresses = [5, 7]
+    addresses = [5]
     Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
-    # obs = Py_env.reset()
-    # global i
-    # time_total = 0
-    # for i in range(3):
-    #     start = time.time()
-    #     obs_ = Py_env.step(np.array([[1],
-    #                                  [1]]))
-    #     print(obs_)
-    #     time_one_iter = time.time() - start
-    #     time_total += time_one_iter
-    #     print("time taken_iter{}:".format(i), time_one_iter)
-    # print('total time over_ 2 iteration: ', time_total/(i+1))
+    obs = Py_env.reset()
+    global i
+    time_total = 0
+    for i in range(5):
+        start = time.time()
+        obs_ = Py_env.step(np.array([[1]]))
+        print(obs_)
+        time_one_iter = time.time() - start
+        time_total += time_one_iter
+        print("time taken_iter{}:".format(i), time_one_iter)
+    print('total time over_ 2 iteration: ', time_total / (i + 1))
 
     print("# Learning")
     #
-    model = A2C('MlpPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
+    model = A2C('CnnPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 

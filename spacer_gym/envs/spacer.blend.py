@@ -10,8 +10,7 @@ import bpy
 import bmesh
 import numpy as np
 import pickle
-from PIL import Image
-from gym import logger, spaces
+# from PIL import Image
 import random
 from blendtorch import btb
 from spacer import Spacer
@@ -40,7 +39,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.np_random = None
         self.state = 40
         self.steps_beyond_done = None
-        self.topology_dir = '/home/mohanty/PycharmProjects/Project_Spacer/topology/pkl_5/'
+        self.topology_dir = 'topology/pkl_5'
         self.topologies = os.listdir(self.topology_dir)
 
     def update_scene(self):
