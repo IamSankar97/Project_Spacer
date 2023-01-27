@@ -189,7 +189,7 @@ class Penv(gym.Env):
         self.spacer_data = os.listdir(self.spacer_data_dir)
         self.image_size = (512, 512)
 
-    def get_actual_sp(self):
+    def get_real_sp(self):
         filename = random.choice(self.spacer_data)
         if filename.endswith('.png'):
             actual_spacer = Image.open(os.path.join(self.spacer_data_dir, filename))
@@ -204,10 +204,9 @@ class Penv(gym.Env):
     def step(self, action):
         obs_ = self.environments.step([action])
         self.state, reward, done, info = [np.asarray(obs_[0], dtype=np.float64) * 255], obs_[1], obs_[2], obs_[3]
-        real_spacer = self.get_actual_sp()
+        real_spacer = self.get_real_sp()
         real_spacer = np.asarray(real_spacer.resize(self.image_size), dtype=np.float64) * 255
-        fake_spacer = self.state[0]
-        actual, fake = get_trainable_data(real_spacer, device), get_trainable_data(fake_spacer, device)
+        actual, fake = get_trainable_data(real_spacer, device), get_trainable_data(self.state[0], device)
         loss, real_score, fake_score = train_discriminator(actual, fake, opt_d)
 
         # Try to fool the discriminator
@@ -230,7 +229,7 @@ def main():
     time_total = 0
     for i in range(5):
         start = time.time()
-        obs_ = Py_env.step(np.array([[1]]))
+        obs_ = Py_env.step(np.array([[1], [1]]))
         print(obs_)
         time_one_iter = time.time() - start
         time_total += time_one_iter

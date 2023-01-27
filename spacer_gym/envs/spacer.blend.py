@@ -4,28 +4,19 @@
 
 import sys
 import os
-sys.path.append(os.getcwd())
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
 import bpy
 import bmesh
 import numpy as np
 import pickle
-# from PIL import Image
 import random
 from blendtorch import btb
 from spacer import Spacer
-
+sys.path.append(os.getcwd())
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
 
 class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
         super().__init__(agent)
-
-        self.mat = None
-        self.mesh_name = None
-        self.vertices = None
-        self.unit = None
-        self.objs = None
-
         self.spacer = bpy.data.objects["spacer_ring"]
         self.camera = bpy.data.objects["Camera"]
         self.light = bpy.data.objects["Light"]
@@ -39,6 +30,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.np_random = None
         self.state = 40
         self.steps_beyond_done = None
+        self.vertices = None
         self.topology_dir = 'topology/pkl_5'
         self.topologies = os.listdir(self.topology_dir)
 
@@ -98,25 +90,18 @@ class SpacerEnv(btb.env.BaseEnv):
     def _env_post_step(self):
 
         # Setup default image rendering
-
         global r_
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-        image = off.render()
+        self.state = off.render()
 
-        self.state = image
-        # Check if shower is done based on number of episodes need to modigy this code
-        # done = True if 24 > self.state > 31 else done = False
         done, r_ = False, 1
 
         return dict(obs=self.state, reward=r_, done=done)
 
     def _action(self, action):
-        self.light.data.energy += 0
+        self.light.data.energy += action
 
-    def normalize_(self, state_v):
-        state_v = ((0.85 * state_v) / 5.0)
-        return state_v
 
     # def run(self, frame_range=None, use_animation=True):
     #     super().run(frame_range, use_animation)

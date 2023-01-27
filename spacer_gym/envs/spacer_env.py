@@ -18,12 +18,13 @@ class SpacerEnv(btt.env.OpenAIRemoteEnv):
             script=Path(__file__).parent / "spacer.blend.py",
             real_time=real_time,
             render_every=render_every,
-            address=address
+            address=address,
         )
 
         self.up_limit = 60
         self.lw_limit = 40
-        self.action_space = spaces.Discrete(2)
+        self.action_space = spaces.Box(0.1, 0.7, shape=(1,))
+
         self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
                                             dtype=np.float32)
         self.seed()
