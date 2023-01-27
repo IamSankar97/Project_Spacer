@@ -152,7 +152,6 @@ def train_discriminator(real_images, fake_images, opt_d):
 
 
 def get_trainable_data(image, assign_device):
-    # ------ This is where Discriminator will be placed. ------ #
     crop_images = [torch.from_numpy(np.array([image[i: i + 256, j: j + 256]])) for i in range(0, 512, 256)
                    for j in range(0, 512, 256)]
     crop_images = torch.stack(crop_images)
@@ -177,11 +176,6 @@ class Penv(gym.Env):
     def __init__(self, add):
         self.env_id = "blendtorch-spacer-v2"
         self.environments = gym.make(self.env_id, address=add, real_time=False)
-        self.up_limit = 60
-        self.lw_limit = 40
-        self.action_space = spaces.Discrete(2)
-        self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
-                                            dtype=np.float32)
         self.state = [25]
         self.reward = 0
         self.spacer_data_dir = 'spacer_data/train/'
@@ -194,7 +188,6 @@ class Penv(gym.Env):
         filename = random.choice(self.spacer_data)
         if filename.endswith('.png'):
             actual_spacer = Image.open(os.path.join(self.spacer_data_dir, filename))
-            # actual_spacer.show()
             return actual_spacer
 
     def reset(self):
@@ -205,7 +198,6 @@ class Penv(gym.Env):
     def step(self, action):
         #   Take action and collect observations
         obs_ = self.environments.step(action)
-        # [np.asarray(obs_[0].resize((256, 256)), dtype=np.float64) / 255]
         self.state, reward, done, info = reshape_obs(obs_[0]), obs_[1], obs_[2], obs_[3]
 
         #   Start Reward shaping
@@ -236,16 +228,16 @@ def main():
     addresses = [5]
     Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
-    # obs = Py_env.reset()
-    # global i
-    # time_total = 0
-    # for i in range(5):
-    #     start = time.time()
-    #     obs_ = Py_env.step(np.array([[0.5]]))
-    #     time_one_iter = time.time() - start
-    #     time_total += time_one_iter
-    #     print("time taken_iter{}:".format(i), time_one_iter)
-    # print('total time over_ 2 iteration: ', time_total / (i + 1))
+    obs = Py_env.reset()
+    global i
+    time_total = 0
+    for i in range(15):
+        start = time.time()
+        obs_ = Py_env.step(np.array([[0.5]]))
+        time_one_iter = time.time() - start
+        time_total += time_one_iter
+        print("time taken_iter{}:".format(i), time_one_iter)
+    print('total time over_ 2 iteration: ', time_total / (i + 1))
 
     print("#    Learning")
     model = PPO('CnnPolicy', Py_env, tensorboard_log=LOG_DIR,

@@ -1,5 +1,4 @@
 from pathlib import Path
-from gym import spaces
 from blendtorch import btt
 import random
 import numpy as np
