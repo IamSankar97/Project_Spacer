@@ -20,13 +20,6 @@ class SpacerEnv(btt.env.OpenAIRemoteEnv):
             render_every=render_every,
             address=address,
         )
-
-        self.up_limit = 60
-        self.lw_limit = 40
-        self.action_space = spaces.Box(0.1, 0.7, shape=(1,))
-
-        self.observation_space = spaces.Box(low=self.lw_limit, high=self.up_limit, shape=(1,),
-                                            dtype=np.float32)
         self.seed()
 
     def seed(self, seed=None):

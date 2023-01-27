@@ -13,7 +13,8 @@ import spacer_gym
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from stable_baselines3 import A2C
+# from stable_baselines3 import A2C
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.logger import configure
@@ -152,26 +153,24 @@ def train_discriminator(real_images, fake_images, opt_d):
 
 def get_trainable_data(image, assign_device):
     # ------ This is where Discriminator will be placed. ------ #
-    crop_images = [torch.from_numpy(np.array([image[i: i + 256, j: j + 256]])) for i in range(0, 512, 256) for j in
-                   range(0, 512, 256)]
+    crop_images = [torch.from_numpy(np.array([image[i: i + 256, j: j + 256]])) for i in range(0, 512, 256)
+                   for j in range(0, 512, 256)]
     crop_images = torch.stack(crop_images)
     crop_images = crop_images.float()
-    # spacer_act_y = np.ones(len(spacer_act_x))
-
-    # spacer_fake = [torch.from_numpy(np.array([fake_spacer[i: i + 256, j: j + 256]])) for i in range(0, 512, 256) for j in range(0, 512, 256)]
-    # spacer_fake_x = torch.stack(spacer_fake)
-    # spacer_fake_x = spacer_fake_x.float()
-
-    # spacer_fake_y = np.zeros(len(spacer_fake_x))
-    # spacer_x, spacer_y = spacer_act_x + spacer_fake_x, spacer_act_y + spacer_fake_y
     return to_device(crop_images, assign_device)
 
 
 def binary_accuracy(y_pred, y_true):
-    y_pred_label = (y_pred > 0.5).long()  # round off the predicted probability to the nearest label (0 or 1)
+    y_pred_label = (y_pred > 0.7).long()  # round off the predicted probability to the nearest label (0 or 1)
     correct = torch.eq(y_pred_label, y_true)
     acc = torch.mean(correct.float())
     return acc
+
+
+def reshape_obs(observation):
+    obs = [np.asarray(observation.resize((256, 256)), dtype=np.float64) / 255]
+    obs = np.reshape(obs[0], (256, 256, 1))
+    return obs
 
 
 class Penv(gym.Env):
@@ -188,6 +187,8 @@ class Penv(gym.Env):
         self.spacer_data_dir = 'spacer_data/train/'
         self.spacer_data = os.listdir(self.spacer_data_dir)
         self.image_size = (512, 512)
+        self.action_space = spaces.Box(0.1, 0.7, shape=(1,))
+        self.observation_space = spaces.Box(low=0, high=255, shape=(256, 256, 1), dtype=np.uint8)
 
     def get_real_sp(self):
         filename = random.choice(self.spacer_data)
@@ -198,22 +199,33 @@ class Penv(gym.Env):
 
     def reset(self):
         obs_ = self.environments.reset()
-        self.state = np.asarray(obs_)
+        self.state = reshape_obs(obs_)
         return self.state
 
     def step(self, action):
-        obs_ = self.environments.step([action])
-        self.state, reward, done, info = [np.asarray(obs_[0], dtype=np.float64) * 255], obs_[1], obs_[2], obs_[3]
+        #   Take action and collect observations
+        obs_ = self.environments.step(action)
+        # [np.asarray(obs_[0].resize((256, 256)), dtype=np.float64) / 255]
+        self.state, reward, done, info = reshape_obs(obs_[0]), obs_[1], obs_[2], obs_[3]
+
+        #   Start Reward shaping
         real_spacer = self.get_real_sp()
-        real_spacer = np.asarray(real_spacer.resize(self.image_size), dtype=np.float64) * 255
-        actual, fake = get_trainable_data(real_spacer, device), get_trainable_data(self.state[0], device)
+        real_spacer = np.asarray(real_spacer.resize(self.image_size), dtype=np.float64) / 255
+        fake_spacer = np.asarray(obs_[0], dtype=np.float64) / 255
+        actual, fake = get_trainable_data(real_spacer, device), get_trainable_data(fake_spacer, device)
+
+        #   Train discriminator
         loss, real_score, fake_score = train_discriminator(actual, fake, opt_d)
 
-        # Try to fool the discriminator
+        #   Try to fool the discriminator
         preds = discriminator(fake)
         targets = torch.ones(4, 1, device=device)
         reward = binary_accuracy(preds, targets)
         reward = reward.cpu().numpy()
+        #   End Reward shaping
+
+        done = True if np.average(self.state[0]) > 0.8 else False
+
         return self.state, [reward], done, info
 
 
@@ -224,30 +236,30 @@ def main():
     addresses = [5]
     Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
-    obs = Py_env.reset()
-    global i
-    time_total = 0
-    for i in range(5):
-        start = time.time()
-        obs_ = Py_env.step(np.array([[1], [1]]))
-        print(obs_)
-        time_one_iter = time.time() - start
-        time_total += time_one_iter
-        print("time taken_iter{}:".format(i), time_one_iter)
-    print('total time over_ 2 iteration: ', time_total / (i + 1))
+    # obs = Py_env.reset()
+    # global i
+    # time_total = 0
+    # for i in range(5):
+    #     start = time.time()
+    #     obs_ = Py_env.step(np.array([[0.5]]))
+    #     time_one_iter = time.time() - start
+    #     time_total += time_one_iter
+    #     print("time taken_iter{}:".format(i), time_one_iter)
+    # print('total time over_ 2 iteration: ', time_total / (i + 1))
 
-    print("# Learning")
-    #
-    model = A2C('CnnPolicy', Py_env, verbose=1, n_steps=1500, learning_rate=0.0001)
+    print("#    Learning")
+    model = PPO('CnnPolicy', Py_env, tensorboard_log=LOG_DIR,
+                verbose=1, learning_rate=0.00001, n_steps=8192,
+                clip_range=.1, gamma=.95, gae_lambda=.9)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
     model.set_logger(new_logger)
     total_time_step = 100000
-    # Multiprocessed RL Training
+    #   Multi-processed RL Training
     model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
-    #
+
     # total_time_multi = time.time() - start_time
     #
     # print(f"Took {total_time_multi:.2f}s for multiprocessed version - {total_time_step / total_time_multi:.2f} FPS")

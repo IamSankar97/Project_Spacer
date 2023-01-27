@@ -100,7 +100,8 @@ class SpacerEnv(btb.env.BaseEnv):
         return dict(obs=self.state, reward=r_, done=done)
 
     def _action(self, action):
-        self.light.data.energy += action
+        print(action)
+        self.light.data.energy = 0.5
 
 
     # def run(self, frame_range=None, use_animation=True):
