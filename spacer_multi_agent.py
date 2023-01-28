@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 # from stable_baselines3 import A2C
 from stable_baselines3 import PPO
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.logger import configure
@@ -116,11 +117,6 @@ class DeviceDataLoader():
         return len(self.dl)
 
 
-device = get_default_device()
-discriminator = to_device(discriminator, device)
-opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
-
-
 def train_discriminator(real_images, fake_images, opt_d):
     # Clear discriminator gradients
     opt_d.zero_grad()
@@ -168,6 +164,11 @@ def reshape_obs(observation):
     obs = [np.asarray(observation.resize((256, 256)), dtype=np.float64) / 255]
     obs = np.reshape(obs[0], (256, 256, 1))
     return obs
+
+
+device = get_default_device()
+discriminator = to_device(discriminator, device)
+opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
 
 
 class Penv(gym.Env):
@@ -219,6 +220,38 @@ class Penv(gym.Env):
         return self.state, [reward], done, info
 
 
+class CustomCNN(BaseFeaturesExtractor):
+    """
+    :param observation_space: (gym.Space)
+    :param features_dim: (int) Number of features extracted.
+        This corresponds to the number of unit for the last layer.
+    """
+
+    def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
+        super().__init__(observation_space, features_dim)
+        # We assume CxHxW images (channels first)
+        # Re-ordering will be done by pre-preprocessing or wrapper
+        n_input_channels = observation_space.shape[0]
+        self.cnn = nn.Sequential(
+            nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+
+        # Compute shape by doing one forward pass
+        with torch.no_grad():
+            n_flatten = self.cnn(
+                torch.as_tensor(observation_space.sample()[None]).float()
+            ).shape[1]
+
+        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        return self.linear(self.cnn(observations))
+
+
 def main():
     def make_env(address):
         return lambda: Penv(address)
@@ -237,10 +270,14 @@ def main():
         print("time taken_iter{}:".format(i), time_one_iter)
     print('total time over_ 2 iteration: ', time_total / (i + 1))
 
-    print("#    Learning")
-    model = PPO('CnnPolicy', Py_env, tensorboard_log=LOG_DIR,
-                verbose=1, learning_rate=0.00001, n_steps=8192,
-                clip_range=.1, gamma=.95, gae_lambda=.9)
+    print("# Learning")
+
+    policy_kwargs = dict(
+        features_extractor_class=CustomCNN,
+        features_extractor_kwargs=dict(features_dim=128),
+    )
+    model = PPO("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.00001,
+                n_steps=8192, clip_range=.1, gamma=.95, gae_lambda=.9, verbose=1)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
