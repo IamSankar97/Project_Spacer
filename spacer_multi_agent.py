@@ -122,8 +122,6 @@ opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999
 
 
 def train_discriminator(real_images, fake_images, opt_d):
-    # real_images = to_device(real_images, device)
-    # fake_images = to_device(fake_images, device)
     # Clear discriminator gradients
     opt_d.zero_grad()
 
