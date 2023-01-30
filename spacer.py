@@ -190,6 +190,7 @@ class Spacer:
 
             return slope, rise, run, no_of_grids, discrete, find_coo
 
+        #   Generates a Dataframe listing start and end coordinates of the defects.
         defect_geometry[['X0', 'Y0']] = pd.DataFrame(defect_geometry[0].tolist(), index=defect_geometry.index)
         defect_geometry[['X1', 'Y1']] = pd.DataFrame(defect_geometry[1].tolist(), index=defect_geometry.index)
         defect_geometry.rename(columns={2: 'theta1'}, inplace=True)
@@ -199,10 +200,6 @@ class Spacer:
             = pd.DataFrame(defect_geometry['result'].tolist(), index=defect_geometry.index)
 
         defect_geometry.drop(['result'], axis=1, inplace=True)
-
-        df = self.point_coo.copy()
-        df['X_grid'] = df['X'].div(self.grid_spacing).round().astype(int)
-        df['Y_grid'] = df['Y'].div(self.grid_spacing).round().astype(int)
 
         defect_end_co = []
         for index, row in defect_geometry.iterrows():

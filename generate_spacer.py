@@ -28,7 +28,7 @@ def get_sample_surface(addr):
                     np.random.randint(1, 85), \
                     np.round(np.random.uniform(2, 10), 2), \
                     random.choice([0, 1])
-            spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
+            spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, 0)
             f.close()
             yield spacer, ro, r1, theta0, defect_length, defect_type
 
@@ -44,7 +44,7 @@ def main(addr_topology: str, addr_img_save: str):
             blend = Blender(np.array(point_coordinates))
             objects = blend.get_objs()
             blend.set_scene_linear_unit('METERS')
-            blend.generate_polygon('my_mesh')
+            blend.generate_polygon('spacer_ring')
 
             time_poly = time.time() - start
             spacer_surf = objects['spacer_ring']
