@@ -4,17 +4,16 @@ from gym import spaces
 import numpy as np
 import os
 import sys
-import pickle
 import random
 from PIL import Image
 
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
+import resnet
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# from stable_baselines3 import A2C
-from stable_baselines3 import PPO
+from stable_baselines3 import DDPG
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
@@ -25,6 +24,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from typing import Callable
 from stable_baselines3.common.env_checker import check_env
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 CHECKPOINT_DIR = 'train/train_Center/A2C_pa5_train_gym2_large2.8'
 LOG_DIR = 'logs/log_center/Target_max/A2C_pa5_train_gym2_large2.8'
 
@@ -51,46 +51,45 @@ class TrainAndLoggingCallback(BaseCallback):
         return True
 
 
-discriminator = nn.Sequential(
-    # in: 1 x 256 x 256
-    nn.Conv2d(1, 256, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(256),
-    nn.LeakyReLU(0.2, inplace=True),
-    # out: 256 x 128 x 128
+# discriminator = nn.Sequential(
+#     # in: 1 x 256 x 256
+#     nn.Conv2d(1, 256, kernel_size=4, stride=2, padding=1, bias=False),
+#     nn.BatchNorm2d(256),
+#     nn.LeakyReLU(0.2, inplace=True),
+#     # out: 256 x 128 x 128
+#
+#     nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
+#     nn.BatchNorm2d(512),
+#     nn.LeakyReLU(0.2, inplace=True),
+#     # out: 512 x 64 x 64
+#
+#     nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
+#     nn.BatchNorm2d(1024),
+#     nn.LeakyReLU(0.2, inplace=True),
+#     # out: 1024 x 32 x 32
+#
+#     nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1, bias=False),
+#     nn.BatchNorm2d(2048),
+#     nn.LeakyReLU(0.2, inplace=True),
+#     # out: 2048 x 16 x 16
+#
+#     nn.Conv2d(2048, 4096, kernel_size=4, stride=2, padding=1, bias=False),
+#     nn.BatchNorm2d(4096),
+#     nn.LeakyReLU(0.2, inplace=True),
+#     # out: 4096 x 8 x 8
+#
+#     nn.Conv2d(4096, 1, kernel_size=8, stride=1, padding=0, bias=False),
+#     # out: 1 x 1 x 1
+#
+#     nn.Flatten(),
+#     nn.Sigmoid())
 
-    nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(512),
-    nn.LeakyReLU(0.2, inplace=True),
-    # out: 512 x 64 x 64
-
-    nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(1024),
-    nn.LeakyReLU(0.2, inplace=True),
-    # out: 1024 x 32 x 32
-
-    nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(2048),
-    nn.LeakyReLU(0.2, inplace=True),
-    # out: 2048 x 16 x 16
-
-    nn.Conv2d(2048, 4096, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(4096),
-    nn.LeakyReLU(0.2, inplace=True),
-    # out: 4096 x 8 x 8
-
-    nn.Conv2d(4096, 1, kernel_size=8, stride=1, padding=0, bias=False),
-    # out: 1 x 1 x 1
-
-    nn.Flatten(),
-    nn.Sigmoid())
+discriminator = resnet.resnet18()
 
 
-def get_default_device():
+def get_device(device_index: str):
     """Pick GPU if available, else CPU"""
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    else:
-        return torch.device('cpu')
+    return torch.device('cuda' + device_index if torch.cuda.is_available() else 'cpu')
 
 
 def to_device(data, device):
@@ -117,37 +116,9 @@ class DeviceDataLoader():
         return len(self.dl)
 
 
-def train_discriminator(real_images, fake_images, opt_d):
-    # Clear discriminator gradients
-    opt_d.zero_grad()
-
-    # Pass real images through discriminator
-    real_images = real_images.float()
-    fake_images = fake_images.float()
-
-    real_preds = discriminator(real_images)
-    real_targets = torch.ones(4, 1, device=device)
-    real_loss = F.binary_cross_entropy(real_preds, real_targets)
-    real_score = torch.mean(real_preds).item()
-
-    # Generate fake images
-
-    # Pass fake images through discriminator
-    fake_targets = torch.zeros(4, 1, device=device)
-    fake_preds = discriminator(fake_images)
-    fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
-    fake_score = torch.mean(fake_preds).item()
-
-    # Update discriminator weights
-    loss = real_loss + fake_loss
-    loss.backward()
-    opt_d.step()
-    return loss.item(), real_score, fake_score
-
-
-def get_trainable_data(image, assign_device):
-    crop_images = [torch.from_numpy(np.array([image[i: i + 256, j: j + 256]])) for i in range(0, 512, 256)
-                   for j in range(0, 512, 256)]
+def get_trainable_data(image, crop_size, assign_device):
+    crop_images = [torch.from_numpy(np.array([image[i: i + crop_size, j: j + crop_size]])) for i in range(0, int(crop_size * 2), crop_size)
+                   for j in range(0, int(crop_size * 2), crop_size)]
     crop_images = torch.stack(crop_images)
     crop_images = crop_images.float()
     return to_device(crop_images, assign_device)
@@ -166,9 +137,38 @@ def reshape_obs(observation):
     return obs
 
 
-device = get_default_device()
-discriminator = to_device(discriminator, device)
+device_0 = get_device('0')
+device_1 = get_device('1')
+discriminator = to_device(discriminator, device_0)
 opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
+
+
+def train_discriminator(real_images, fake_images, opt_d):
+    # Clear discriminator gradients
+    opt_d.zero_grad()
+
+    # Pass real images through discriminator
+    real_images = real_images.float()
+    fake_images = fake_images.float()
+
+    real_preds = discriminator(real_images)
+    real_targets = torch.ones(4, 1, device=device_0)
+    real_loss = F.binary_cross_entropy(real_preds, real_targets)
+    real_score = torch.mean(real_preds).item()
+
+    # Generate fake images
+
+    # Pass fake images through discriminator
+    fake_targets = torch.zeros(4, 1, device=device_0)
+    fake_preds = discriminator(fake_images)
+    fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
+    fake_score = torch.mean(fake_preds).item()
+
+    # Update discriminator weights
+    loss = real_loss + fake_loss
+    loss.backward()
+    opt_d.step()
+    return loss.item(), real_score, fake_score
 
 
 class Penv(gym.Env):
@@ -179,7 +179,7 @@ class Penv(gym.Env):
         self.reward = 0
         self.spacer_data_dir = 'spacer_data/train/'
         self.spacer_data = os.listdir(self.spacer_data_dir)
-        self.image_size = (512, 512)
+        self.image_size = (int(448), int(448))
         self.action_space = spaces.Box(0.1, 0.7, shape=(1,))
         self.observation_space = spaces.Box(low=0, high=255, shape=(256, 256, 1), dtype=np.uint8)
 
@@ -203,14 +203,15 @@ class Penv(gym.Env):
         real_spacer = self.get_real_sp()
         real_spacer = np.asarray(real_spacer.resize(self.image_size), dtype=np.float64) / 255
         fake_spacer = np.asarray(obs_[0], dtype=np.float64) / 255
-        actual, fake = get_trainable_data(real_spacer, device), get_trainable_data(fake_spacer, device)
+        actual, fake = get_trainable_data(real_spacer, int(self.image_size[0] / 2), device_0), \
+            get_trainable_data(fake_spacer, int(self.image_size[0] / 2), device_0)
 
         #   Train discriminator
         loss, real_score, fake_score = train_discriminator(actual, fake, opt_d)
 
         #   Try to fool the discriminator
         preds = discriminator(fake)
-        targets = torch.ones(4, 1, device=device)
+        targets = torch.ones(4, 1, device=device_0)
         reward = binary_accuracy(preds, targets)
         reward = reward.cpu().numpy()
         #   End Reward shaping
@@ -239,14 +240,12 @@ class CustomCNN(BaseFeaturesExtractor):
             nn.ReLU(),
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=0),
             nn.ReLU(),
-            nn.Flatten(),
-        )
+            nn.Flatten())
 
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten = self.cnn(
-                torch.as_tensor(observation_space.sample()[None]).float()
-            ).shape[1]
+                torch.as_tensor(observation_space.sample()[None]).float()).shape[1]
 
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
@@ -264,7 +263,7 @@ def main():
     obs = Py_env.reset()
     global i
     time_total = 0
-    for i in range(15):
+    for i in range(1):
         start = time.time()
         obs_ = Py_env.step(np.array([[0.5]]))
         time_one_iter = time.time() - start
@@ -276,10 +275,10 @@ def main():
 
     policy_kwargs = dict(
         features_extractor_class=CustomCNN,
-        features_extractor_kwargs=dict(features_dim=128),
-    )
-    model = PPO("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.00001,
-                n_steps=8192, clip_range=.1, gamma=.95, gae_lambda=.9, verbose=1)
+        features_extractor_kwargs=dict(features_dim=128))
+
+    model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.00001,
+                 batch_size=1, gamma=.95, verbose=1, device=device_1)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
@@ -289,11 +288,8 @@ def main():
     #   Multi-processed RL Training
     model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
 
-    # total_time_multi = time.time() - start_time
-    #
-    # print(f"Took {total_time_multi:.2f}s for multiprocessed version - {total_time_step / total_time_multi:.2f} FPS")
-    #
-    # # Evaluate the trained agent
+    # ----------------------------Below Code to be Updated-------------------------#
+    # Evaluate the trained agent
     # env_val = gym.make("env_id", address=num_cpu + 2, real_time=False)
     # for episode in range(10):
     #     obs = env_val.reset()
@@ -305,9 +301,9 @@ def main():
     #         time.sleep(0.2)
     #         total_reward += reward
     #     print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
-    #
-    # # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
-    # # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
+
+    # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
+    # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
 
 
 if __name__ == '__main__':

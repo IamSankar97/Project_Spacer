@@ -93,7 +93,7 @@ class SpacerEnv(btb.env.BaseEnv):
         global r_
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-        self.state = off.render()
+        self.state = off.render(image_size=(448, 448))
 
         done, r_ = False, 1
 
