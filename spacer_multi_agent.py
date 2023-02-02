@@ -51,45 +51,43 @@ class TrainAndLoggingCallback(BaseCallback):
         return True
 
 
-# discriminator = nn.Sequential(
-#     # in: 1 x 256 x 256
-#     nn.Conv2d(1, 256, kernel_size=4, stride=2, padding=1, bias=False),
-#     nn.BatchNorm2d(256),
-#     nn.LeakyReLU(0.2, inplace=True),
-#     # out: 256 x 128 x 128
-#
-#     nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
-#     nn.BatchNorm2d(512),
-#     nn.LeakyReLU(0.2, inplace=True),
-#     # out: 512 x 64 x 64
-#
-#     nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
-#     nn.BatchNorm2d(1024),
-#     nn.LeakyReLU(0.2, inplace=True),
-#     # out: 1024 x 32 x 32
-#
-#     nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1, bias=False),
-#     nn.BatchNorm2d(2048),
-#     nn.LeakyReLU(0.2, inplace=True),
-#     # out: 2048 x 16 x 16
-#
-#     nn.Conv2d(2048, 4096, kernel_size=4, stride=2, padding=1, bias=False),
-#     nn.BatchNorm2d(4096),
-#     nn.LeakyReLU(0.2, inplace=True),
-#     # out: 4096 x 8 x 8
-#
-#     nn.Conv2d(4096, 1, kernel_size=8, stride=1, padding=0, bias=False),
-#     # out: 1 x 1 x 1
-#
-#     nn.Flatten(),
-#     nn.Sigmoid())
+discriminator = nn.Sequential(
+    # in: 1 x 256 x 256
+    nn.Conv2d(1, 256, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(256),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 256 x 128 x 128
 
-discriminator = resnet.resnet18()
+    nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(512),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 512 x 64 x 64
+
+    nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(1024),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 1024 x 32 x 32
+
+    nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(2048),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 2048 x 16 x 16
+
+    nn.Conv2d(2048, 4096, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(4096),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 4096 x 8 x 8
+
+    nn.Conv2d(4096, 1, kernel_size=7, stride=1, padding=0, bias=False),
+    # out: 1 x 1 x 1
+
+    nn.Flatten(),
+    nn.Sigmoid())
 
 
 def get_device(device_index: str):
     """Pick GPU if available, else CPU"""
-    return torch.device('cuda' + device_index if torch.cuda.is_available() else 'cpu')
+    return torch.device('cuda:' + device_index if torch.cuda.is_available() else 'cpu')
 
 
 def to_device(data, device):
@@ -180,7 +178,7 @@ class Penv(gym.Env):
         self.spacer_data_dir = 'spacer_data/train/'
         self.spacer_data = os.listdir(self.spacer_data_dir)
         self.image_size = (int(448), int(448))
-        self.action_space = spaces.Box(0.1, 0.7, shape=(1,))
+        self.action_space = spaces.Box(0, 1, shape=(27,))
         self.observation_space = spaces.Box(low=0, high=255, shape=(256, 256, 1), dtype=np.uint8)
 
     def get_real_sp(self):
@@ -260,16 +258,17 @@ def main():
     addresses = [5]
     Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
-    obs = Py_env.reset()
-    global i
-    time_total = 0
-    for i in range(1):
-        start = time.time()
-        obs_ = Py_env.step(np.array([[0.5]]))
-        time_one_iter = time.time() - start
-        time_total += time_one_iter
-        print("time taken_iter{}:".format(i), time_one_iter)
-    print('total time over_ 2 iteration: ', time_total / (i + 1))
+
+    # obs = Py_env.reset()
+    # global i
+    # time_total = 0
+    # for i in range(1):
+    #     start = time.time()
+    #     obs_ = Py_env.step(np.array([[0.5]]))
+    #     time_one_iter = time.time() - start
+    #     time_total += time_one_iter
+    #     print("time taken_iter{}:".format(i), time_one_iter)
+    # print('total time over_ 2 iteration: ', time_total / (i + 1))
 
     print("# Learning")
 
@@ -278,7 +277,7 @@ def main():
         features_extractor_kwargs=dict(features_dim=128))
 
     model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.00001,
-                 batch_size=1, gamma=.95, verbose=1, device=device_1)
+                 batch_size=1, gamma=.95, verbose=1, device=device_1, buffer_size= 1000)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 

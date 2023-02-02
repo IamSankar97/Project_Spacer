@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import pickle
+
 np.random.seed(0)
 
 
@@ -72,11 +73,11 @@ def compare_height(lin_trans_surface_original, lin_trans_surface_realised, addre
 
     fig, axes = my_surface_o.show(['profile', 'psd', 'histogram'], ['image', 'image'], figsize=(15, 5))
     fig.suptitle('Target_3.6', fontsize=16)
-    plt.savefig(address+"_target.png")
+    plt.savefig(address + "_target.png")
     plt.clf()
 
     fig, axes = my_surface_r.show(['profile', 'psd', 'histogram'], ['image', 'image'], figsize=(15, 5))
-    fig.suptitle('Actual_'+address.split('to')[1], fontsize=16)
+    fig.suptitle('Actual_' + address.split('to')[1], fontsize=16)
     plt.savefig(address + "_actual.png")
     plt.clf()
 
@@ -95,8 +96,8 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
 
     path = '/home/mohanty/PycharmProjects/Digital_twin/' \
            'Spacer_Inspection/ｓ１/ｈｅｉｇｈｔ１_corrected.csv'
-    #address = address+"{}/".format(reduce_resolution_by)
-    address = address + "pkl_50/"
+    # address = address+"{}/".format(reduce_resolution_by)
+    address = address + "pkl_5/"
     grid_spacing = 3.697  # Original grid_spacing
 
     surf_height = pd.read_csv(path, delimiter=',')
@@ -108,9 +109,9 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
     lin_trans_surface_original = fit_random_filter_surface(slippy_s, grid_spacing)
     lin_trans_surface_realised = fit_random_filter_surface(slippy_s, desired_grid_spacing)
 
-    spacer_outer_dia = (32*1000) + (desired_grid_spacing * 1)   # mm to micrometer *1000
+    spacer_outer_dia = (32 * 1000) + (desired_grid_spacing * 1)  # mm to micrometer *1000 Actully 32.6  but 0.6 contribute to the chamfers
 
-    for i in range(0, 20):
+    for i in range(0, 20000):
         my_realisation = generate_surface(lin_trans_surface_realised, spacer_outer_dia, desired_grid_spacing, True)
 
         if compare:
@@ -125,7 +126,7 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
 
         if height_compare:
             compare_height(lin_trans_surface_original, lin_trans_surface_realised, 'my_height_plot_X1_dx3.69to{}'
-                        .format(np.round(desired_grid_spacing), 2))
+                           .format(np.round(desired_grid_spacing), 2))
 
         # Method to add grid spacing information
         realisation = pd.DataFrame(my_realisation.profile)
@@ -146,5 +147,6 @@ def main(address: str, reduce_resolution_by: int = 1, compare: bool = False, hei
 
         print("Done_{}".format(i))
 
+
 if __name__ == "__main__":
-    main("topology/", 50, compare=False, height_compare=False)
+    main("topology/", 5, compare=False, height_compare=False)
