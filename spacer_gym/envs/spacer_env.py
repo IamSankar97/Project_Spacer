@@ -13,7 +13,7 @@ class SpacerEnv(btt.env.OpenAIRemoteEnv):
         super().__init__(version="0.0.1")
         self.np_random = None
         self.launch(
-            scene=Path(__file__).parent / "spacer.blend",
+            scene=Path(__file__).parent / "spacer_2.blend",
             script=Path(__file__).parent / "spacer.blend.py",
             real_time=real_time,
             render_every=render_every,

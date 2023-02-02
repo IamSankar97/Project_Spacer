@@ -2,10 +2,12 @@
 # import pydevd_pycharm
 # pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
+import math
 import sys
 import os
 import bpy
 import bmesh
+import colorsys
 import numpy as np
 import pickle
 import random
@@ -21,7 +23,6 @@ class SpacerEnv(btb.env.BaseEnv):
         super().__init__(agent)
         self.action_pair = None
         self.spacer = bpy.data.objects["spacer_ring"]
-        self.spacer.mat.use_nodes = True
         self.camera = bpy.data.objects["Camera"]
         self.light0 = bpy.data.objects["L0_top"]
         self.light1 = bpy.data.objects["L1_0"]
@@ -93,8 +94,8 @@ class SpacerEnv(btb.env.BaseEnv):
 
     def inverse_normalization(self, action_range):
         action_inverse_normalized = {}
-        for key, range in action_range:
-            value = (self.action_pair[key] * (range.max() - range.min())) + range.min()
+        for key, range_ in action_range.items():
+            value = (self.action_pair[key] * (max(range_) - min(range_)) + min(range_))
             action_inverse_normalized[key] = value
 
         return action_inverse_normalized
@@ -106,6 +107,9 @@ class SpacerEnv(btb.env.BaseEnv):
         self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
 
     def _env_reset(self):
+        dummy_actions = np.random.random_sample(size=len(self.action_keys))
+        self.take_action(dummy_actions)
+
         return self._env_post_step()
 
     def _env_post_step(self):
@@ -124,13 +128,16 @@ class SpacerEnv(btb.env.BaseEnv):
         self.action_pair = dict(zip(self.action_keys, actions))
         action_material = self.inverse_normalization(self.action_Material)
         action_light_cmn = self.inverse_normalization(self.action_light_cmn)
-        action_light = self.inverse_normalization(self.action_light)
+        action_light_specific = self.inverse_normalization(self.action_light)
 
         self.update_mat(action_material)
         self.update_lights(action_light_cmn, action_light_specific)
 
     def update_mat(self, actions):
-        mat_nodes = self.spacer.node_tree.nodes['Principled BSDF']
+        mat = self.spacer.data.materials[0]
+        if not mat.use_nodes:
+            mat.use_nodes = True
+        mat_nodes = mat.node_tree.nodes['Principled BSDF']
         mat_nodes.inputs['Specular'].default_value = actions['specular']
         mat_nodes.inputs['IOR'].default_value = actions['ior']
         mat_nodes.inputs['Base Color'].default_value = (actions['b_clr_hue'], actions['b_clr_satur'],
@@ -139,28 +146,31 @@ class SpacerEnv(btb.env.BaseEnv):
     def update_lights(self, cmn_actions, specific_actions):
 
         #   set size
-        self.light0.size, self.light1.size, self.light2.size = cmn_actions["area_size"]
+        self.light0.data.size, self.light1.data.size, self.light2.data.size = cmn_actions["area_size"], cmn_actions[
+            "area_size"], cmn_actions["area_size"]
 
         #   set color
-        light0_rgb = self.light0.color
-        hsv_color = light0_rgb.hsv
-        hsv_color[0], hsv_color[1], hsv_color[2] = cmn_actions['hue'], cmn_actions['saturation'], cmn_actions['value']
-        light0_rgb = hsv_color.rgb
-        self.light0.color, self.light1.color, self.light2.color = light0_rgb
-
+        hsv_color = (cmn_actions['hue'], cmn_actions['saturation'], cmn_actions['value'])
+        rgb_color = colorsys.hsv_to_rgb(*hsv_color)
+        dummy_alpha = tuple([1.0])
+        self.light0.color, self.light1.color, self.light2.color = rgb_color + dummy_alpha, rgb_color + dummy_alpha, \
+                                                                  rgb_color + dummy_alpha
         #   set energy
         self.light0.data.energy, self.light1.data.energy, self.light2.data.energy = specific_actions['energy0'], \
             specific_actions['energy1'], specific_actions['energy2']
 
         #   set locations
         self.light0.location.z = specific_actions["Z0"]
-        self.light0.rotation_euler = (specific_actions["x_r"], specific_actions["y_r"], self.light0.rotation_euler[2])
+        radians0 = (specific_actions["x_r0"], specific_actions["y_r0"], self.light0.rotation_euler[2])
+        self.light0.rotation_euler = [math.degrees(r) for r in radians0]
 
         self.light1.location = (specific_actions["X1"], specific_actions["Y1"], specific_actions["Z1"])
-        self.light1.rotation_euler = (specific_actions["x_r1"], specific_actions["y_r1"], specific_actions["z_r1"])
+        radians1 = (specific_actions["x_r1"], specific_actions["y_r1"], specific_actions["z_r1"])
+        self.light1.rotation_euler = [math.degrees(r) for r in radians1]
 
         self.light2.location = (specific_actions["X2"], specific_actions["Y2"], specific_actions["Z2"])
-        self.light2.rotation_euler = (specific_actions["x_r2"], specific_actions["y_r2"], specific_actions["z_r2"])
+        radians2 = (specific_actions["x_r2"], specific_actions["y_r2"], specific_actions["z_r2"])
+        self.light2.rotation_euler = [math.degrees(r) for r in radians2]
 
     # def run(self, frame_range=None, use_animation=True):
     #     super().run(frame_range, use_animation)

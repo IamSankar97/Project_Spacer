@@ -259,16 +259,17 @@ def main():
     Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
 
-    # obs = Py_env.reset()
-    # global i
-    # time_total = 0
-    # for i in range(1):
-    #     start = time.time()
-    #     obs_ = Py_env.step(np.array([[0.5]]))
-    #     time_one_iter = time.time() - start
-    #     time_total += time_one_iter
-    #     print("time taken_iter{}:".format(i), time_one_iter)
-    # print('total time over_ 2 iteration: ', time_total / (i + 1))
+    obs = Py_env.reset()
+    global i
+    time_total = 0
+    for i in range(3):
+        start = time.time()
+        action_dummy = Py_env.action_space.sample()
+        obs_ = Py_env.step(np.array([action_dummy]))
+        time_one_iter = time.time() - start
+        time_total += time_one_iter
+        print("time taken_iter{}:".format(i), time_one_iter)
+    print('total time over_ 2 iteration: ', time_total / (i + 1))
 
     print("# Learning")
 
