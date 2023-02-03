@@ -16,7 +16,7 @@ from spacer import Spacer
 
 sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
-
+sys.stdout = open(os.devnull, 'w')
 
 class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
@@ -38,19 +38,35 @@ class SpacerEnv(btb.env.BaseEnv):
         self.topologies = os.listdir(self.topology_dir)
         self.action_Material = {'specular': [0.5, 1], 'ior': [1.5, 2.5], 'b_clr_hue': [0.2, 1],
                                 'b_clr_satur': [0.2, 1], 'b_clr_value': [0.2, 1]}
-        self.action_light_cmn = {"area_size": [36, 150], "hue": [0, 1], "saturation": [0, 1], "value": [0, 1]}
+        self.action_light_cmn = {"area_size": [0.036, 0.15], "hue": [0, 1], "saturation": [0, 1], "value": [0, 1]}
         #   Total 27 keys
-        self.action_light = {"Z0": [50, 200], "x_r0": [-35, 35], 'y_r0': [-35, 35], 'energy0': [10, 100],
+        self.action_light = {"Z0": [0.05, 0.2], "x_r0": [-35, 35], 'y_r0': [-35, 35], 'energy0': [10, 100],
                              #   light1
-                             "X1": [40, 100], "Y1": [40, 100], "Z1": [50, 150],
+                             "X1": [0.04, 0.1], "Y1": [0.01, 0.1], "Z1": [0.05, 0.15],
                              "x_r1": [0, 35], 'y_r1': [20, 40], 'z_r1': [50, 150], 'energy1': [10, 100],
                              #   light2
-                             "X2": [-40, -100], "Y2": [40, 100], "Z2": [50, 150],
+                             "X2": [-0.04, -0.1], "Y2": [0.04, 0.1], "Z2": [0.05, 0.15],
                              "x_r2": [-15, 15], 'y_r2': [-20, -45], 'z_r2': [-50, -75], 'energy2': [10, 100]
                              }
 
         self.action_keys = list(self.action_Material.keys()) + list(self.action_light_cmn.keys()) + \
                            list(self.action_light.keys())
+
+        bpy.ops.object.select_all(action='DESELECT')
+
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                # Found an active 3D View
+                space = area.spaces[0]
+                break
+        else:
+            # No active 3D View found
+            print("No active 3D View found.")
+            space = None
+
+        if space:
+            # Set the shading mode to 'RENDERED'
+            space.shading.type = 'RENDERED'
 
     def update_scene(self):
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
@@ -162,15 +178,15 @@ class SpacerEnv(btb.env.BaseEnv):
         #   set locations
         self.light0.location.z = specific_actions["Z0"]
         radians0 = (specific_actions["x_r0"], specific_actions["y_r0"], self.light0.rotation_euler[2])
-        self.light0.rotation_euler = [math.degrees(r) for r in radians0]
+        self.light0.rotation_euler = [math.radians(r) for r in radians0]
 
         self.light1.location = (specific_actions["X1"], specific_actions["Y1"], specific_actions["Z1"])
         radians1 = (specific_actions["x_r1"], specific_actions["y_r1"], specific_actions["z_r1"])
-        self.light1.rotation_euler = [math.degrees(r) for r in radians1]
+        self.light1.rotation_euler = [math.radians(r) for r in radians1]
 
         self.light2.location = (specific_actions["X2"], specific_actions["Y2"], specific_actions["Z2"])
         radians2 = (specific_actions["x_r2"], specific_actions["y_r2"], specific_actions["z_r2"])
-        self.light2.rotation_euler = [math.degrees(r) for r in radians2]
+        self.light2.rotation_euler = [math.radians(r) for r in radians2]
 
     # def run(self, frame_range=None, use_animation=True):
     #     super().run(frame_range, use_animation)

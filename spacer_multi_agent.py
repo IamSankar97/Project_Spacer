@@ -137,6 +137,7 @@ def reshape_obs(observation):
 
 device_0 = get_device('0')
 device_1 = get_device('1')
+device_0 = device_1
 discriminator = to_device(discriminator, device_0)
 opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
 
@@ -262,7 +263,7 @@ def main():
     obs = Py_env.reset()
     global i
     time_total = 0
-    for i in range(3):
+    for i in range(5):
         start = time.time()
         action_dummy = Py_env.action_space.sample()
         obs_ = Py_env.step(np.array([action_dummy]))
