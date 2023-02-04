@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 class BasicBlock(nn.Module):
     """Basic Block for resnet 18 and resnet 34
@@ -77,7 +77,7 @@ class ResNet(nn.Module):
         self.in_channels = 64
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(in_channels=1, out_channels=64, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True))
         # we use a different inputsize than the original paper
@@ -121,14 +121,15 @@ class ResNet(nn.Module):
         output = self.avg_pool(output)
         output = output.view(output.size(0), -1)
         output = self.fc(output)
+        output = F.softmax(output, dim=1)
 
         return output
 
 
-def resnet18():
+def resnet18(num_classs):
     """ return a ResNet 18 object
     """
-    return ResNet(BasicBlock, [2, 2, 2, 2])
+    return ResNet(BasicBlock, [2, 2, 2, 2],num_classes= num_classs)
 
 
 def resnet34():
@@ -153,6 +154,3 @@ def resnet152():
     """ return a ResNet 152 object
     """
     return ResNet(BottleNeck, [3, 8, 36, 3])
-
-
-rs18 = resnet18()

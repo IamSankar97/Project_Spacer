@@ -10,7 +10,6 @@ from PIL import Image
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 import spacer_gym
 import resnet
-import csv
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,12 +23,10 @@ from stable_baselines3.common.vec_env import VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 from typing import Callable
 from stable_baselines3.common.env_checker import check_env
-import datetime
 
-stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-CHECKPOINT_DIR = 'train_logs/spacer{}/PPO_model'.format(stamp)
-LOG_DIR = 'train_logs/spacer{}/PPO_log'.format(stamp)
+CHECKPOINT_DIR = 'train_a/train_Center/A2C_pa5_train_gym2_large2.8'
+LOG_DIR = 'logs_a/log_center/Target_max/A2C_pa5_train_gym2_large2.8'
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -52,6 +49,40 @@ class TrainAndLoggingCallback(BaseCallback):
 
             self.model.save(model_path)
         return True
+
+
+discriminator = nn.Sequential(
+    # in: 1 x 256 x 256
+    nn.Conv2d(1, 256, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(256),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 256 x 128 x 128
+
+    nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(512),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 512 x 64 x 64
+
+    nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(1024),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 1024 x 32 x 32
+
+    nn.Conv2d(1024, 2048, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(2048),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 2048 x 16 x 16
+
+    nn.Conv2d(2048, 4096, kernel_size=4, stride=2, padding=1, bias=False),
+    nn.BatchNorm2d(4096),
+    nn.LeakyReLU(0.2, inplace=True),
+    # out: 4096 x 8 x 8
+
+    nn.Conv2d(4096, 1, kernel_size=7, stride=1, padding=0, bias=False),
+    # out: 1 x 1 x 1
+
+    nn.Flatten(),
+    nn.Sigmoid())
 
 
 def get_device(device_index: str):
@@ -84,8 +115,7 @@ class DeviceDataLoader():
 
 
 def get_trainable_data(image, crop_size, assign_device):
-    crop_images = [torch.from_numpy(np.array([image[i: i + crop_size, j: j + crop_size]])) for i in
-                   range(0, int(crop_size * 2), crop_size)
+    crop_images = [torch.from_numpy(np.array([image[i: i + crop_size, j: j + crop_size]])) for i in range(0, int(crop_size * 2), crop_size)
                    for j in range(0, int(crop_size * 2), crop_size)]
     crop_images = torch.stack(crop_images)
     crop_images = crop_images.float()
@@ -99,20 +129,19 @@ def binary_accuracy(y_pred, y_true):
     return acc
 
 
-def normalize_loss(loss):
-    return 10 - (loss / (-torch.log(torch.tensor(1e-9))))
+def normalize_loss(loss, epsilon=1e-8):
+    max_loss = torch.log(torch.tensor(1.0 / epsilon)).item()
+    return loss / max_loss
 
 
-def reshape_obs(observation, img_size=(256, 256)):
+def reshape_obs(observation, img_size = (256, 256)):
     obs = [np.asarray(observation.resize(img_size), dtype=np.float64) / 255]
-    obs = np.reshape(obs[0], img_size + tuple([1]))
+    obs = np.reshape(obs[0], img_size+ tuple([1]))
     return obs
 
 
 device_0 = get_device('0')
 device_1 = get_device('1')
-device_0 = device_1
-discriminator = resnet.resnet18(2)
 discriminator = to_device(discriminator, device_0)
 opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
 
@@ -126,16 +155,15 @@ def train_discriminator(real_images, fake_images, opt_d):
     fake_images = fake_images.float()
 
     real_preds = discriminator(real_images)
-    real_targets = to_device(torch.tensor([[1, 0] for _ in range(real_preds.size(0))]).float(), device_0)
-    # real_targets= real_targets.float()
+    real_targets = torch.ones(4, 1, device=device_0)
     real_loss = F.binary_cross_entropy(real_preds, real_targets)
     real_score = torch.mean(real_preds).item()
 
     # Generate fake images
 
     # Pass fake images through discriminator
+    fake_targets = torch.zeros(4, 1, device=device_0)
     fake_preds = discriminator(fake_images)
-    fake_targets = to_device(torch.tensor([[0, 1] for _ in range(fake_preds.size(0))]).float(), device_0)
     fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
     fake_score = torch.mean(fake_preds).item()
 
@@ -144,17 +172,6 @@ def train_discriminator(real_images, fake_images, opt_d):
     loss.backward()
     opt_d.step()
     return loss.item(), real_score, fake_score
-
-
-def binary_cross_entropy_loss(predictions, labels):
-    """
-    Computes binary cross entropy loss given predictions and one-hot encoded labels.
-    """
-    predictions = torch.clamp(predictions, min=1e-8, max=1 - 1e-8)
-    return -torch.sum(labels * torch.log(predictions) + (1 - labels) * torch.log(1 - predictions))
-
-
-track_losses = {"disc_loss": [], "disc_real_score": [], "disc_fake_score": [], "gene_loss": []}
 
 
 class Penv(gym.Env):
@@ -166,7 +183,7 @@ class Penv(gym.Env):
         self.spacer_data_dir = 'spacer_data/train/'
         self.spacer_data = os.listdir(self.spacer_data_dir)
         self.image_size = (int(448), int(448))
-        self.action_space = spaces.Box(0, 1, shape=(25,))
+        self.action_space = spaces.Box(0, 1, shape=(27,))
         self.observation_space = spaces.Box(low=0, high=255, shape=(256, 256, 1), dtype=np.uint8)
 
     def get_real_sp(self):
@@ -196,23 +213,17 @@ class Penv(gym.Env):
         loss, real_score, fake_score = train_discriminator(actual, fake, opt_d)
 
         #   Try to fool the discriminator
-        discriminator.eval()
         preds = discriminator(fake)
-        targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(),
-                            device_0)  # fake is told as real
-        generator_loss = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
-        reward = normalize_loss(generator_loss).item()
+        targets = torch.ones(4, 1, device=device_0)
+        fooling_loss = F.binary_cross_entropy(preds, targets)
+        reward = normalize_loss(fooling_loss)
+        reward = reward.detach().cpu().numpy()
 
         done = True if np.average(self.state) > 0.12 else False
 
-        print("fooling_loss: {}, reward: {}".format(generator_loss, reward))
+        print("fooling_loss: {}, reward: {}".format(fooling_loss, reward))
         #   End Reward shaping
-        track_losses['disc_loss'].append(loss)
-        track_losses['disc_real_score'].append(real_score)
-        track_losses['disc_fake_score'].append(fake_score)
-        track_losses['gene_loss'].append(generator_loss)
-
-        return self.state, [reward], done, info
+        return self.state, reward, done, info
 
 
 class CustomCNN(BaseFeaturesExtractor):
@@ -251,7 +262,7 @@ def main():
     def make_env(address):
         return lambda: Penv(address)
 
-    addresses = [5]
+    addresses = [6, 7]
     Py_env = SubprocVecEnv([make_env(address) for address in addresses])
 
     # obs = Py_env.reset()
@@ -259,36 +270,30 @@ def main():
     # time_total = 0
     # for i in range(5):
     #     start = time.time()
-    #     action_dummy = Py_env.action_space.sample()
-    #     obs_ = Py_env.step(np.array([action_dummy]))
+    #     action_dummy0 = Py_env.action_space.sample()
+    #     action_dummy1 = Py_env.action_space.sample()
+    #     obs_ = Py_env.step(np.array([action_dummy0,action_dummy1]))
     #     time_one_iter = time.time() - start
     #     time_total += time_one_iter
     #     print("time taken_iter{}:".format(i), time_one_iter)
     # print('total time over_ 2 iteration: ', time_total / (i + 1))
-    #
-    # print("# Learning")
+
+    print("# Learning")
 
     policy_kwargs = dict(
         features_extractor_class=CustomCNN,
         features_extractor_kwargs=dict(features_dim=128))
 
     model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.001,
-                 batch_size=1, gamma=.95, verbose=1, device=device_1, buffer_size=1000, train_freq=5)
+                 batch_size=1, gamma=.95, verbose=1, device=device_0, buffer_size= 1000, train_freq=(2, "step"))
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
     model.set_logger(new_logger)
-    total_time_step = 10
+    total_time_step = 100000
     #   Multi-processed RL Training
-    model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
-
-    filename = "example.csv"
-
-    # writing to csv file
-    import pandas as pd
-    df = pd.DataFrame(track_losses)
-    df.to_csv("loss.csv")
+    model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1,)
 
     # ----------------------------Below Code to be Updated-------------------------#
     # Evaluate the trained agent

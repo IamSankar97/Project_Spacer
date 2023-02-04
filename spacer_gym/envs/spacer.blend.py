@@ -16,7 +16,7 @@ from spacer import Spacer
 
 sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
-sys.stdout = open(os.devnull, 'w')
+
 
 class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
@@ -36,39 +36,41 @@ class SpacerEnv(btb.env.BaseEnv):
         self.vertices = None
         self.topology_dir = 'topology/pkl_5'
         self.topologies = os.listdir(self.topology_dir)
-        self.action_Material = {'specular': [0.5, 1], 'ior': [1.5, 2.5], 'b_clr_hue': [0.2, 1],
-                                'b_clr_satur': [0.2, 1], 'b_clr_value': [0.2, 1]}
+        #   (3)
+        self.action_Material = {'specular': [0.5, 1], 'ior': [1.5, 2.5], 'b_clr_value': [0.2, 1]}  # 'b_clr_hue': [0.2, 1], 'b_clr_satur': [0.2, 1],
+        #   (4)
         self.action_light_cmn = {"area_size": [0.036, 0.15], "hue": [0, 1], "saturation": [0, 1], "value": [0, 1]}
-        #   Total 27 keys
-        self.action_light = {"Z0": [0.05, 0.2], "x_r0": [-35, 35], 'y_r0': [-35, 35], 'energy0': [10, 100],
+        #   (4, 7, 7)
+        self.action_light = {"Z0": [0.05, 0.2], "x_r0": [-35, 35], 'y_r0': [-35, 35], 'energy0': [0.01, 0.1],
                              #   light1
                              "X1": [0.04, 0.1], "Y1": [0.01, 0.1], "Z1": [0.05, 0.15],
-                             "x_r1": [0, 35], 'y_r1': [20, 40], 'z_r1': [50, 150], 'energy1': [10, 100],
+                             "x_r1": [0, 35], 'y_r1': [20, 40], 'z_r1': [50, 150], 'energy1': [0.01, 0.1],
                              #   light2
                              "X2": [-0.04, -0.1], "Y2": [0.04, 0.1], "Z2": [0.05, 0.15],
-                             "x_r2": [-15, 15], 'y_r2': [-20, -45], 'z_r2': [-50, -75], 'energy2': [10, 100]
+                             "x_r2": [-15, 15], 'y_r2': [-20, -45], 'z_r2': [-50, -75], 'energy2': [0.01, 0.1]
                              }
-
+        # Total = 25
         self.action_keys = list(self.action_Material.keys()) + list(self.action_light_cmn.keys()) + \
                            list(self.action_light.keys())
 
-        bpy.ops.object.select_all(action='DESELECT')
-
-        for area in bpy.context.screen.areas:
-            if area.type == 'VIEW_3D':
-                # Found an active 3D View
-                space = area.spaces[0]
-                break
-        else:
-            # No active 3D View found
-            print("No active 3D View found.")
-            space = None
-
-        if space:
-            # Set the shading mode to 'RENDERED'
-            space.shading.type = 'RENDERED'
+        # bpy.ops.object.select_all(action='DESELECT')
+        #
+        # for area in bpy.context.screen.areas:
+        #     if area.type == 'VIEW_3D':
+        #         # Found an active 3D View
+        #         space = area.spaces[0]
+        #         break
+        # else:
+        #     # No active 3D View found
+        #     print("No active 3D View found.")
+        #     space = None
+        #
+        # if space:
+        #     # Set the shading mode to 'RENDERED'
+        #     space.shading.type = 'RENDERED'
 
     def update_scene(self):
+        print()
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
     def update_mesh_back_ground(self, new_realisation: np.ndarray):
@@ -142,24 +144,27 @@ class SpacerEnv(btb.env.BaseEnv):
 
     def take_action(self, actions):
         self.action_pair = dict(zip(self.action_keys, actions))
-        action_material = self.inverse_normalization(self.action_Material)
-        action_light_cmn = self.inverse_normalization(self.action_light_cmn)
-        action_light_specific = self.inverse_normalization(self.action_light)
 
-        self.update_mat(action_material)
-        self.update_lights(action_light_cmn, action_light_specific)
+        self.update_mat()
+        self.update_lights()
 
-    def update_mat(self, actions):
+    def update_mat(self):
+        actions = self.inverse_normalization(self.action_Material)
         mat = self.spacer.data.materials[0]
         if not mat.use_nodes:
             mat.use_nodes = True
         mat_nodes = mat.node_tree.nodes['Principled BSDF']
         mat_nodes.inputs['Specular'].default_value = actions['specular']
         mat_nodes.inputs['IOR'].default_value = actions['ior']
-        mat_nodes.inputs['Base Color'].default_value = (actions['b_clr_hue'], actions['b_clr_satur'],
-                                                        actions['b_clr_value'], 1)
+        base_clr_rgb = mat_nodes.inputs['Base Color'].default_value[:3]
+        h, s, v = colorsys.rgb_to_hsv(*base_clr_rgb)
+        v_new = actions['b_clr_value']
+        r, g, b = colorsys.hsv_to_rgb(h, s, v_new)
+        mat_nodes.inputs['Base Color'].default_value = (r, g, b, 1)
 
-    def update_lights(self, cmn_actions, specific_actions):
+    def update_lights(self):
+        cmn_actions = self.inverse_normalization(self.action_light_cmn)
+        specific_actions = self.inverse_normalization(self.action_light)
 
         #   set size
         self.light0.data.size, self.light1.data.size, self.light2.data.size = cmn_actions["area_size"], cmn_actions[

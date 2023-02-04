@@ -25,6 +25,9 @@ from stable_baselines3.common.callbacks import BaseCallback
 from typing import Callable
 from stable_baselines3.common.env_checker import check_env
 import datetime
+import logging
+logging.basicConfig(level=logging.INFO)
+
 
 stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
@@ -158,9 +161,9 @@ track_losses = {"disc_loss": [], "disc_real_score": [], "disc_fake_score": [], "
 
 
 class Penv(gym.Env):
-    def __init__(self, add):
+    def __init__(self):
         self.env_id = "blendtorch-spacer-v2"
-        self.environments = gym.make(self.env_id, address=add, real_time=False)
+        self.environments = gym.make(self.env_id, address=5, real_time=False)
         self.state = [25]
         self.reward = 0
         self.spacer_data_dir = 'spacer_data/train/'
@@ -212,7 +215,7 @@ class Penv(gym.Env):
         track_losses['disc_fake_score'].append(fake_score)
         track_losses['gene_loss'].append(generator_loss)
 
-        return self.state, [reward], done, info
+        return self.state, reward, done, info
 
 
 class CustomCNN(BaseFeaturesExtractor):
@@ -248,11 +251,7 @@ class CustomCNN(BaseFeaturesExtractor):
 
 
 def main():
-    def make_env(address):
-        return lambda: Penv(address)
-
-    addresses = [5]
-    Py_env = SubprocVecEnv([make_env(address) for address in addresses])
+    Py_env = Penv()
 
     # obs = Py_env.reset()
     # global i
@@ -260,12 +259,12 @@ def main():
     # for i in range(5):
     #     start = time.time()
     #     action_dummy = Py_env.action_space.sample()
-    #     obs_ = Py_env.step(np.array([action_dummy]))
+    #     obs_ = Py_env.step(np.array(action_dummy))
     #     time_one_iter = time.time() - start
     #     time_total += time_one_iter
     #     print("time taken_iter{}:".format(i), time_one_iter)
     # print('total time over_ 2 iteration: ', time_total / (i + 1))
-    #
+
     # print("# Learning")
 
     policy_kwargs = dict(
@@ -273,7 +272,7 @@ def main():
         features_extractor_kwargs=dict(features_dim=128))
 
     model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.001,
-                 batch_size=1, gamma=.95, verbose=1, device=device_1, buffer_size=1000, train_freq=5)
+                 batch_size=1, gamma=.95, verbose=1, device=device_0, buffer_size=1000, train_freq=5)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
@@ -283,12 +282,11 @@ def main():
     #   Multi-processed RL Training
     model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
 
-    filename = "example.csv"
-
     # writing to csv file
     import pandas as pd
     df = pd.DataFrame(track_losses)
-    df.to_csv("loss.csv")
+    print(df)
+    df.to_csv("loss.csv", index = False)
 
     # ----------------------------Below Code to be Updated-------------------------#
     # Evaluate the trained agent
