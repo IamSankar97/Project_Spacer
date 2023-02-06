@@ -1,5 +1,6 @@
 import time
 import gym
+import stable_baselines3
 from gym import spaces
 import numpy as np
 import os
@@ -18,6 +19,7 @@ from stable_baselines3 import DDPG
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
+from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecMonitor
@@ -26,8 +28,8 @@ from typing import Callable
 from stable_baselines3.common.env_checker import check_env
 import datetime
 import logging
-logging.basicConfig(level=logging.INFO)
 
+logging.basicConfig(level=logging.INFO)
 
 stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
@@ -38,6 +40,7 @@ FINAL_MODEL_DIR = 'train_logs/spacer{}/PPO_final_model'.format(stamp)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(FINAL_MODEL_DIR, exist_ok=True)
+
 
 class TrainAndLoggingCallback(BaseCallback):
 
@@ -104,7 +107,20 @@ def binary_accuracy(y_pred, y_true):
 
 
 def normalize_loss(loss):
-    return 1 - (loss / (-torch.log(torch.tensor(1e-5))))
+    return 2 - (loss / (-torch.log(torch.tensor(1e-4))))
+
+
+def augument(image):
+    random_number = random.randint(0, 3)
+    if random_number == 0:
+        return image
+    elif random_number == 1:
+        return image.transpose(Image.FLIP_TOP_BOTTOM)
+    elif random_number == 2:
+        image = image.transpose(Image.FLIP_TOP_BOTTOM)
+        return image.transpose(Image.FLIP_LEFT_RIGHT)
+    else:
+        return image.transpose(Image.FLIP_LEFT_RIGHT)
 
 
 def reshape_obs(observation, img_size=(256, 256)):
@@ -118,7 +134,7 @@ device_1 = get_device('1')
 device_0 = device_1
 discriminator = resnet.resnet18(2)
 discriminator = to_device(discriminator, device_0)
-opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
+opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
 
 
 def train_discriminator(real_images, fake_images, opt_d):
@@ -163,7 +179,7 @@ track_losses = {"disc_loss": [], "disc_real_score": [], "disc_fake_score": [], "
 
 class Penv(gym.Env):
     def __init__(self):
-        self.done_threshold = 0.1618 # derived by calculating max avg value over all the available actual spacer data
+        self.done_threshold = 0.1618  # derived by calculating max avg value over all the available actual spacer data
         self.env_id = "blendtorch-spacer-v2"
         self.environments = gym.make(self.env_id, address=5, real_time=False)
         self.state = [25]
@@ -175,9 +191,12 @@ class Penv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=255, shape=(256, 256, 1), dtype=np.uint8)
 
     def get_real_sp(self):
+        if not self.spacer_data:
+            self.spacer_data = os.listdir(self.spacer_data_dir)
         filename = random.choice(self.spacer_data)
         if filename.endswith('.png'):
             actual_spacer = Image.open(os.path.join(self.spacer_data_dir, filename))
+            self.spacer_data.remove(filename)
             return actual_spacer
 
     def reset(self):
@@ -187,14 +206,14 @@ class Penv(gym.Env):
 
     def step(self, action):
         #   Take action and collect observations
-        action = np.round(action, 2)
         obs_ = self.environments.step(action)
         self.state, reward, done, info = reshape_obs(obs_[0], (256, 256)), obs_[1], obs_[2], obs_[3]
 
         #   Start Reward shaping
         real_spacer = self.get_real_sp()
         real_spacer = np.asarray(real_spacer.resize(self.image_size), dtype=np.float64) / 255
-        fake_spacer = np.asarray(obs_[0], dtype=np.float64) / 255
+        fake_spacer = augument(obs_[0])
+        fake_spacer = np.asarray(fake_spacer, dtype=np.float64) / 255
         actual, fake = get_trainable_data(real_spacer, int(self.image_size[0] / 2), device_0), \
             get_trainable_data(fake_spacer, int(self.image_size[0] / 2), device_0)
 
@@ -208,10 +227,11 @@ class Penv(gym.Env):
                             device_0)  # fake is told as real
         generator_loss = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
         reward = normalize_loss(generator_loss).item()
-
-        done = True if np.average(self.state) > self.done_threshold else False
-
-        print("fooling_loss: {}, reward: {}".format(generator_loss, reward))
+        done_cond = np.average(self.state)
+        done = False if self.done_threshold > done_cond > 0.1282 else True
+        if not done:
+            reward += 0.5
+        print("avg_image: {},done:{} fooling_loss: {}, reward: {}".format(done_cond, done, generator_loss, reward))
         #   End Reward shaping
         track_losses['disc_loss'].append(loss)
         track_losses['disc_real_score'].append(real_score)
@@ -241,7 +261,6 @@ class CustomCNN(BaseFeaturesExtractor):
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=0),
             nn.ReLU(),
             nn.Flatten())
-
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten = self.cnn(
@@ -274,22 +293,25 @@ def main():
         features_extractor_class=CustomCNN,
         features_extractor_kwargs=dict(features_dim=128))
 
+    action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(25), sigma=0.1 * np.ones(25))
+
     model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.0001,
-                 batch_size=1, gamma=.95, verbose=1, device=device_0, buffer_size=1000, train_freq=1)
+                 batch_size=10, gamma=.95, verbose=1, device=device_0, buffer_size=5000, train_freq=10,
+                 action_noise=action_noise)
 
     callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
     model.set_logger(new_logger)
-    total_time_step = 10000
+    total_time_step = 5000
     #   Multi-processed RL Training
     model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
 
-    # writing to csv file
+    #   Writing to csv file
     import pandas as pd
     df = pd.DataFrame(track_losses)
     # print(df)
-    df.to_csv("loss.csv", index = False)
+    df.to_csv("loss.csv", index=False)
     model.save(FINAL_MODEL_DIR)
 
     # ----------------------------Below Code to be Updated-------------------------#

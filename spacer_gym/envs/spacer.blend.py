@@ -215,4 +215,5 @@ def main():
     env.run(frame_range=(1, 10000), use_animation=False)
 
 
-main()
+if __name__ == "__main__":
+    main()
