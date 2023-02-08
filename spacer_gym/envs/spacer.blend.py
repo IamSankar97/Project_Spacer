@@ -10,6 +10,7 @@ import bmesh
 import colorsys
 import numpy as np
 import pickle
+import pandas as pd
 import random
 from blendtorch import btb
 from spacer import Spacer
@@ -47,12 +48,13 @@ class SpacerEnv(btb.env.BaseEnv):
                              "x_r1": [0, 35], 'y_r1': [20, 40], 'z_r1': [50, 150], 'energy1': [0.01, 0.1],
                              #   light2
                              "X2": [-0.04, -0.1], "Y2": [0.04, 0.1], "Z2": [0.05, 0.15],
-                             "x_r2": [-15, 15], 'y_r2': [-20, -45], 'z_r2': [-50, -75], 'energy2': [0.01, 0.1]
-                             }
+                             "x_r2": [-15, 15], 'y_r2': [-20, -45], 'z_r2': [-50, -75], 'energy2': [0.01, 0.1]}
         # Total = 25
         self.action_keys = list(self.action_Material.keys()) + list(self.action_light_cmn.keys()) + \
                            list(self.action_light.keys())
 
+        self.initial_action = pd.read_csv('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/'
+                                          'initial_actions.csv', header=None)
         # bpy.ops.object.select_all(action='DESELECT')
         #
         # for area in bpy.context.screen.areas:
@@ -125,7 +127,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
 
     def _env_reset(self):
-        dummy_actions = np.random.random_sample(size=len(self.action_keys))
+        dummy_actions = np.array(self.initial_action.sample())[0]
         self.take_action(dummy_actions)
 
         return self._env_post_step()

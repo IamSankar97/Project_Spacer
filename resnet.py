@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class BasicBlock(nn.Module):
     """Basic Block for resnet 18 and resnet 34
     """
@@ -71,13 +72,13 @@ class BottleNeck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, num_block, num_classes=100):
+    def __init__(self, block, num_block, no_in_channels=3, no_classes=100):
         super().__init__()
 
         self.in_channels = 64
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=64, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(in_channels=no_in_channels, out_channels=64, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True))
         # we use a different inputsize than the original paper
@@ -86,8 +87,8 @@ class ResNet(nn.Module):
         self.conv3_x = self._make_layer(block, 128, num_block[1], 2)
         self.conv4_x = self._make_layer(block, 256, num_block[2], 2)
         self.conv5_x = self._make_layer(block, 512, num_block[3], 2)
-        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.max_pool = nn.AdaptiveMaxPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, no_classes)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         """make resnet layers(by layer i didnt mean this 'layer' was the
@@ -118,7 +119,7 @@ class ResNet(nn.Module):
         output = self.conv3_x(output)
         output = self.conv4_x(output)
         output = self.conv5_x(output)
-        output = self.avg_pool(output)
+        output = self.max_pool(output)
         output = output.view(output.size(0), -1)
         output = self.fc(output)
         output = F.softmax(output, dim=1)
@@ -126,10 +127,10 @@ class ResNet(nn.Module):
         return output
 
 
-def resnet18(num_classs):
+def resnet18(in_channels, num_classs):
     """ return a ResNet 18 object
     """
-    return ResNet(BasicBlock, [2, 2, 2, 2],num_classes= num_classs)
+    return ResNet(BasicBlock, [2, 2, 2, 2], no_in_channels=in_channels, no_classes=num_classs)
 
 
 def resnet34():

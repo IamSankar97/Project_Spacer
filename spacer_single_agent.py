@@ -29,8 +29,6 @@ from stable_baselines3.common.env_checker import check_env
 import datetime
 import logging
 
-logging.basicConfig(level=logging.INFO)
-
 stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 CHECKPOINT_DIR = 'train_logs/spacer{}/PPO_model'.format(stamp)
@@ -40,6 +38,9 @@ FINAL_MODEL_DIR = 'train_logs/spacer{}/PPO_final_model'.format(stamp)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(FINAL_MODEL_DIR, exist_ok=True)
+
+log_file = LOG_DIR + 'discriminator_training.csv'
+log_file2 = LOG_DIR + 'correct_actions.csv'
 
 
 class TrainAndLoggingCallback(BaseCallback):
@@ -132,7 +133,7 @@ def reshape_obs(observation, img_size=(256, 256)):
 device_0 = get_device('0')
 device_1 = get_device('1')
 device_0 = device_1
-discriminator = resnet.resnet18(2)
+discriminator = resnet.resnet18(1, 2)
 discriminator = to_device(discriminator, device_0)
 opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
 
@@ -189,6 +190,10 @@ class Penv(gym.Env):
         self.image_size = (int(448), int(448))
         self.action_space = spaces.Box(0, 1, shape=(25,))
         self.observation_space = spaces.Box(low=0, high=255, shape=(256, 256, 1), dtype=np.uint8)
+        self.episodes = 0
+        self.steps = 0
+        logging.basicConfig(filename=log_file, level=logging.INFO)
+        logging.basicConfig(filename=log_file2, level=logging.INFO)
 
     def get_real_sp(self):
         if not self.spacer_data:
@@ -200,11 +205,14 @@ class Penv(gym.Env):
             return actual_spacer
 
     def reset(self):
+        self.episodes += 1
+        self.steps = 0
         obs_ = self.environments.reset()
         self.state = reshape_obs(obs_)
         return self.state
 
     def step(self, action):
+        self.steps += 1
         #   Take action and collect observations
         obs_ = self.environments.step(action)
         self.state, reward, done, info = reshape_obs(obs_[0], (256, 256)), obs_[1], obs_[2], obs_[3]
@@ -218,7 +226,7 @@ class Penv(gym.Env):
             get_trainable_data(fake_spacer, int(self.image_size[0] / 2), device_0)
 
         #   Train discriminator
-        loss, real_score, fake_score = train_discriminator(actual, fake, opt_d)
+        disc_loss, disc_real_score, disc_fake_score = train_discriminator(actual, fake, opt_d)
 
         #   Try to fool the discriminator
         discriminator.eval()
@@ -226,18 +234,41 @@ class Penv(gym.Env):
         targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(),
                             device_0)  # fake is told as real
         generator_loss = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
+        generator_loss = 1 if generator_loss > 1 else generator_loss
         reward = normalize_loss(generator_loss).item()
         done_cond = np.average(self.state)
         done = False if self.done_threshold > done_cond > 0.1282 else True
         if not done:
             reward += 0.5
-        print("avg_image: {},done:{} fooling_loss: {}, reward: {}".format(done_cond, done, generator_loss, reward))
-        #   End Reward shaping
-        track_losses['disc_loss'].append(loss)
-        track_losses['disc_real_score'].append(real_score)
-        track_losses['disc_fake_score'].append(fake_score)
-        track_losses['gene_loss'].append(generator_loss)
+            with open(log_file2, 'a', newline='') as csvfile2:
+                writer = csv.DictWriter(csvfile2, fieldnames=["actions", "img_avg"])
+                if csvfile2.tell() == 0:
+                    writer.writeheader()
 
+                writer.writerow({'actions': action, 'img_avg': done_cond})
+
+        print("avg_image: {},done:{}, fooling_loss: {}, reward: {}".format(done_cond, done, generator_loss, reward))
+        #   End Reward shaping
+        # track_losses['disc_loss'].append(loss)
+        # track_losses['disc_real_score'].append(real_score)
+        # track_losses['disc_fake_score'].append(fake_score)
+        # track_losses['gene_loss'].append(generator_loss)
+
+        with open(log_file, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=["episode", "steps", "done", "disc_loss", "disc_real_score",
+                                                         "disc_fake_score", "gene_loss"])
+            if csvfile.tell() == 0:
+                writer.writeheader()
+
+            writer.writerow({'episode': self.episodes, 'steps': self.steps, 'done': done, 'disc_loss': disc_loss,
+                             'disc_real_score': disc_real_score, 'disc_fake_score': disc_fake_score,
+                             'gene_loss': generator_loss})
+
+
+        #
+        # with open(log_file, 'a', newline='') as csvfile:
+        #     writer = csv.writer(csvfile)
+        #     writer.writerow([bool(done), loss, real_score, fake_score, generator_loss])
         return self.state, reward, done, info
 
 
@@ -253,14 +284,19 @@ class CustomCNN(BaseFeaturesExtractor):
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space.shape[0]
-        self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=0),
-            nn.ReLU(),
-            nn.Flatten())
+
+        self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-1]).extend(
+            [torch.nn.Flatten()])
+
+        # self.cnn = nn.Sequential(
+        #     nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+        #     nn.ReLU(),
+        #     nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+        #     nn.ReLU(),
+        #     nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=0),
+        #     nn.ReLU(),
+        #     nn.Flatten())
+
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten = self.cnn(
@@ -306,12 +342,6 @@ def main():
     total_time_step = 5000
     #   Multi-processed RL Training
     model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
-
-    #   Writing to csv file
-    import pandas as pd
-    df = pd.DataFrame(track_losses)
-    # print(df)
-    df.to_csv("loss.csv", index=False)
     model.save(FINAL_MODEL_DIR)
 
     # ----------------------------Below Code to be Updated-------------------------#
