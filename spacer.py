@@ -155,8 +155,9 @@ class Spacer:
         # Convert to meter
         r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
         if scratch_length < abs(r0 - r1):
-            scratch_length = abs(r0 - r1)
-            warnings.warn("defect length is smaller than asked radius boundary, considered distance = r2-r1")
+            r1 = r0+scratch_length
+            # scratch_length = abs(r0 - r1)
+            warnings.warn("defect length is smaller than asked radius boundary, r1 is adjusted to meet the scratch_length")
 
         #   Defect grove height and depth from mean surface
         h_up, h_total = self.grid_spacing / np.tan(np.radians(alpha)), \

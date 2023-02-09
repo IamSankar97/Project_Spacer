@@ -54,7 +54,7 @@ class SpacerEnv(btb.env.BaseEnv):
                            list(self.action_light.keys())
 
         self.initial_action = pd.read_csv('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/'
-                                          'initial_actions.csv', header=None)
+                                          'initial_actions2.csv', header=None)
         # bpy.ops.object.select_all(action='DESELECT')
         #
         # for area in bpy.context.screen.areas:
@@ -106,7 +106,7 @@ class SpacerEnv(btb.env.BaseEnv):
                     np.round(np.random.uniform(12.5, 13.2), 2), \
                         np.round(np.random.uniform(13.8, 16), 2), \
                         np.random.randint(1, 85), \
-                        np.round(np.random.uniform(2, 10), 2), \
+                        np.round(np.random.uniform(0.1, 10), 2), \
                         random.choice([0, 1])
                 spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
                 f.close()
@@ -127,7 +127,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
 
     def _env_reset(self):
-        dummy_actions = np.array(self.initial_action.sample())[0]
+        dummy_actions =np.array(self.initial_action.sample())[0]
         self.take_action(dummy_actions)
 
         return self._env_post_step()

@@ -17,27 +17,31 @@ import torch.nn as nn
 import torch.nn.functional as F
 from stable_baselines3 import DDPG
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from stable_baselines3.common.logger import configure
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 from typing import Callable
 from stable_baselines3.common.env_checker import check_env
 import datetime
 import logging
+import torchmetrics
+
+seed_ = 0
+torch.manual_seed(seed_)
+random.seed(seed_)
+np.random.seed(seed_)
 
 stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-CHECKPOINT_DIR = 'train_logs/spacer{}/PPO_model'.format(stamp)
-LOG_DIR = 'train_logs/spacer{}/PPO_log'.format(stamp)
-FINAL_MODEL_DIR = 'train_logs/spacer{}/PPO_final_model'.format(stamp)
+CHECKPOINT_DIR = 'train_logs/spacer{}/DDPG_model'.format(stamp)
+LOG_DIR = 'train_logs/spacer{}/DDPG_log'.format(stamp)
+FINAL_MODEL_DIR = 'train_logs/spacer{}/DDPG_final_model'.format(stamp)
+FINAL_R_BUFFER_DIR = 'train_logs/spacer{}/DDPG_BUFFER_model'.format(stamp)
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(FINAL_MODEL_DIR, exist_ok=True)
+os.makedirs(FINAL_R_BUFFER_DIR, exist_ok=True)
 
 log_file = LOG_DIR + 'discriminator_training.csv'
 log_file2 = LOG_DIR + 'correct_actions.csv'
@@ -59,6 +63,14 @@ class TrainAndLoggingCallback(BaseCallback):
             model_path = os.path.join(self.save_path, 'best_model_{}'.format(self.n_calls))
 
             self.model.save(model_path)
+
+    def on_step(self):
+        self.logger.record('GAN_loss/discriminator_loss', self.training_env.get_attr('discriminator_loss')[0])
+        self.logger.record('GAN_loss/generator_loss', self.training_env.get_attr('generator_loss')[0])
+        self.logger.record('GAN_loss/disc_real_score', self.training_env.get_attr('disc_real_score')[0])
+        self.logger.record('GAN_loss/disc_fake_score', self.training_env.get_attr('disc_fake_score')[0])
+        self.logger.record('rollout/done_cond', self.training_env.get_attr('done_cond')[0])
+        self.logger.record('rollout/reward', self.training_env.get_attr('reward')[0])
         return True
 
 
@@ -135,7 +147,16 @@ device_1 = get_device('1')
 device_0 = device_1
 discriminator = resnet.resnet18(1, 2)
 discriminator = to_device(discriminator, device_0)
-opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
+
+
+def lr_schedule(step):
+    return max(0.00006, 0.001 * np.power(0.1, step / 500))
+
+
+weight_decay = 0.00002
+opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999), weight_decay=weight_decay)
+
+scheduler = torch.optim.lr_scheduler.LambdaLR(opt_d, lr_lambda=lr_schedule)
 
 
 def train_discriminator(real_images, fake_images, opt_d):
@@ -148,22 +169,20 @@ def train_discriminator(real_images, fake_images, opt_d):
 
     real_preds = discriminator(real_images)
     real_targets = to_device(torch.tensor([[1, 0] for _ in range(real_preds.size(0))]).float(), device_0)
-    # real_targets= real_targets.float()
     real_loss = F.binary_cross_entropy(real_preds, real_targets)
-    real_score = torch.mean(real_preds).item()
-
-    # Generate fake images
+    real_score = torchmetrics.functional.accuracy(real_preds, real_targets, task='binary').cpu().numpy().item()
 
     # Pass fake images through discriminator
     fake_preds = discriminator(fake_images)
     fake_targets = to_device(torch.tensor([[0, 1] for _ in range(fake_preds.size(0))]).float(), device_0)
     fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
-    fake_score = torch.mean(fake_preds).item()
+    fake_score = torchmetrics.functional.accuracy(fake_preds, fake_targets, task='binary').cpu().numpy().item()
 
     # Update discriminator weights
     loss = real_loss + fake_loss
     loss.backward()
     opt_d.step()
+    # scheduler.step()
     return loss.item(), real_score, fake_score
 
 
@@ -175,12 +194,31 @@ def binary_cross_entropy_loss(predictions, labels):
     return -torch.sum(labels * torch.log(predictions) + (1 - labels) * torch.log(1 - predictions))
 
 
-track_losses = {"disc_loss": [], "disc_real_score": [], "disc_fake_score": [], "gene_loss": []}
+def log_to_file(log_info, log_file2):
+    with open(log_file2, 'a', newline='') as csvfile2:
+        writer = csv.DictWriter(csvfile2, fieldnames=list(log_info.keys()))
+        if csvfile2.tell() == 0:
+            writer.writeheader()
+
+        writer.writerow(log_info)
+
+
+def find_range(number, dictionary):
+    for key, value in dictionary.items():
+        if value[0] <= number <= value[1]:
+            return key
+    return None
 
 
 class Penv(gym.Env):
     def __init__(self):
-        self.done_threshold = 0.1618  # derived by calculating max avg value over all the available actual spacer data
+        self.done_cond = None
+        self.disc_fake_score = None
+        self.disc_real_score = None
+        self.discriminator_loss = None
+        self.generator_loss = None
+        self.done_threshold = [0.1282, 0.1618]  # derived by calculating max avg value over all the available actual
+        # spacer data
         self.env_id = "blendtorch-spacer-v2"
         self.environments = gym.make(self.env_id, address=5, real_time=False)
         self.state = [25]
@@ -194,6 +232,7 @@ class Penv(gym.Env):
         self.steps = 0
         logging.basicConfig(filename=log_file, level=logging.INFO)
         logging.basicConfig(filename=log_file2, level=logging.INFO)
+        self.done_cond_list = []
 
     def get_real_sp(self):
         if not self.spacer_data:
@@ -204,18 +243,27 @@ class Penv(gym.Env):
             self.spacer_data.remove(filename)
             return actual_spacer
 
+    def chk_termination(self):
+        if max(self.done_threshold) > self.done_cond > min(self.done_threshold) and self.steps < 500:
+            return False
+        else:
+            return True
+
     def reset(self):
         self.episodes += 1
         self.steps = 0
         obs_ = self.environments.reset()
-        self.state = reshape_obs(obs_)
+        self.state = reshape_obs(obs_, (256, 256))
+        done_cond = np.average(self.state)
+        print('reset_done_cond', done_cond)
         return self.state
 
     def step(self, action):
+        self.reward = 0
         self.steps += 1
         #   Take action and collect observations
         obs_ = self.environments.step(action)
-        self.state, reward, done, info = reshape_obs(obs_[0], (256, 256)), obs_[1], obs_[2], obs_[3]
+        self.state, _, done, info = reshape_obs(obs_[0], (256, 256)), obs_[1], obs_[2], obs_[3]
 
         #   Start Reward shaping
         real_spacer = self.get_real_sp()
@@ -226,50 +274,48 @@ class Penv(gym.Env):
             get_trainable_data(fake_spacer, int(self.image_size[0] / 2), device_0)
 
         #   Train discriminator
-        disc_loss, disc_real_score, disc_fake_score = train_discriminator(actual, fake, opt_d)
+        self.discriminator_loss, self.disc_real_score, self.disc_fake_score = train_discriminator(actual, fake, opt_d)
 
         #   Try to fool the discriminator
         discriminator.eval()
         preds = discriminator(fake)
         targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(),
                             device_0)  # fake is told as real
-        generator_loss = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
-        generator_loss = 1 if generator_loss > 1 else generator_loss
-        reward = normalize_loss(generator_loss).item()
-        done_cond = np.average(self.state)
-        done = False if self.done_threshold > done_cond > 0.1282 else True
+        self.generator_loss = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
+
+        # generator_loss = 1 if generator_loss > 1 else generator_loss
+
+        self.reward = normalize_loss(self.generator_loss).item()
+        self.done_cond = np.average(self.state)
+        self.done_cond_list.append(self.done_cond)
+
+        done = self.chk_termination()
+        # Log actions
         if not done:
-            reward += 0.5
-            with open(log_file2, 'a', newline='') as csvfile2:
-                writer = csv.DictWriter(csvfile2, fieldnames=["actions", "img_avg"])
-                if csvfile2.tell() == 0:
-                    writer.writeheader()
+            self.reward += 0.5
 
-                writer.writerow({'actions': action, 'img_avg': done_cond})
+            # log_info = {"actions": action, "img_avg": self.done_cond}
+            # log_to_file(log_info, log_file2)
 
-        print("avg_image: {},done:{}, fooling_loss: {}, reward: {}".format(done_cond, done, generator_loss, reward))
-        #   End Reward shaping
-        # track_losses['disc_loss'].append(loss)
-        # track_losses['disc_real_score'].append(real_score)
-        # track_losses['disc_fake_score'].append(fake_score)
-        # track_losses['gene_loss'].append(generator_loss)
+        # print("episode: {}, steps: {}, avg_image: {:.2f}, done:{}, generator_loss: {:.2f}, disc_loss: {:.2f}, "
+        #       "reward: {:.2f}".format(self.episodes, self.steps, self.done_cond, done, self.generator_loss,
+        #                               self.discriminator_loss, reward))
 
-        with open(log_file, 'a', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["episode", "steps", "done", "disc_loss", "disc_real_score",
-                                                         "disc_fake_score", "gene_loss"])
-            if csvfile.tell() == 0:
-                writer.writeheader()
+        return self.state, self.reward, done, info
 
-            writer.writerow({'episode': self.episodes, 'steps': self.steps, 'done': done, 'disc_loss': disc_loss,
-                             'disc_real_score': disc_real_score, 'disc_fake_score': disc_fake_score,
-                             'gene_loss': generator_loss})
-
-
-        #
-        # with open(log_file, 'a', newline='') as csvfile:
-        #     writer = csv.writer(csvfile)
-        #     writer.writerow([bool(done), loss, real_score, fake_score, generator_loss])
-        return self.state, reward, done, info
+    def get_attr(self, att_name):
+        if att_name == 'discriminator_loss':
+            return self.discriminator_loss
+        elif att_name == 'generator_loss':
+            return self.generator_loss
+        elif att_name == 'disc_real_score':
+            return self.disc_real_score
+        elif att_name == 'disc_fake_score':
+            return self.disc_fake_score
+        elif att_name == 'done_cond':
+            return self.done_cond
+        elif att_name == 'reward':
+            return self.reward
 
 
 class CustomCNN(BaseFeaturesExtractor):
@@ -288,15 +334,6 @@ class CustomCNN(BaseFeaturesExtractor):
         self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-1]).extend(
             [torch.nn.Flatten()])
 
-        # self.cnn = nn.Sequential(
-        #     nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
-        #     nn.ReLU(),
-        #     nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-        #     nn.ReLU(),
-        #     nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=0),
-        #     nn.ReLU(),
-        #     nn.Flatten())
-
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten = self.cnn(
@@ -310,6 +347,7 @@ class CustomCNN(BaseFeaturesExtractor):
 
 def main():
     Py_env = Penv()
+    no_of_actions = Py_env.action_space.shape[0]
 
     # obs = Py_env.reset()
     # global i
@@ -329,20 +367,38 @@ def main():
         features_extractor_class=CustomCNN,
         features_extractor_kwargs=dict(features_dim=128))
 
-    action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(25), sigma=0.1 * np.ones(25))
+    action_noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(no_of_actions), sigma=0.1 * np.ones(no_of_actions))
 
-    model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_rate=0.0001,
-                 batch_size=10, gamma=.95, verbose=1, device=device_0, buffer_size=5000, train_freq=10,
-                 action_noise=action_noise)
+    def linear_schedule(initial_value: float) -> Callable[[float], float]:
+        def func(progress_remaining: float) -> float:
+            return progress_remaining * initial_value
 
-    callback = TrainAndLoggingCallback(check_freq=100, save_path=CHECKPOINT_DIR)
+        return func
+
+    # linear_schedule(0.00006)
+    model = DDPG("CnnPolicy", Py_env, policy_kwargs=policy_kwargs, tensorboard_log=LOG_DIR, learning_starts=500,
+                 learning_rate=0.0001, batch_size=10, gamma=.95, verbose=1, device=device_0,
+                 buffer_size=1500, train_freq=10, action_noise=action_noise, seed=seed_)
+
+    callback = TrainAndLoggingCallback(check_freq=250, save_path=CHECKPOINT_DIR)
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
     model.set_logger(new_logger)
-    total_time_step = 5000
+
     #   Multi-processed RL Training
-    model.learn(total_timesteps=total_time_step, callback=callback, log_interval=1)
-    model.save(FINAL_MODEL_DIR)
+    model.learn(total_timesteps=5000, callback=callback, log_interval=1, tb_log_name="first_run",
+                reset_num_timesteps=False)
+    msg = input("Press Enter to continue...")
+    if msg == 'train':
+        model.learn(total_timesteps=2500, callback=callback, log_interval=1, tb_log_name="second_run",
+                    reset_num_timesteps=False)
+    msg = input("Press Enter to continue...")
+    if msg == 'train':
+        model.learn(total_timesteps=2500, callback=callback, log_interval=1, tb_log_name="third_run",
+                    reset_num_timesteps=False)
+    if msg == 'end':
+        model.save(FINAL_MODEL_DIR)
+        model.save_replay_buffer(FINAL_R_BUFFER_DIR)
 
     # ----------------------------Below Code to be Updated-------------------------#
     # Evaluate the trained agent

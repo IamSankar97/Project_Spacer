@@ -21,7 +21,7 @@ class SpacerEnv(btt.env.OpenAIRemoteEnv):
         )
         self.seed()
 
-    def seed(self, seed=None):
+    def seed(self, seed=1):
         np.random.seed(seed)
         random.seed(seed)
         self.np_random, seed = seeding.np_random(seed)
