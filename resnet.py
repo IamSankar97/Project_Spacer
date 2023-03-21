@@ -135,6 +135,12 @@ def resnet10(in_channels, num_classs):
     return ResNet(BasicBlock, [1, 1, 1, 1], no_in_channels=in_channels, no_classes=num_classs)
 
 
+def resnet12(in_channels, num_classs):
+    """ return a ResNet 18 object
+    """
+    return ResNet(BasicBlock, [2, 1, 1, 1], no_in_channels=in_channels, no_classes=num_classs)
+
+
 def resnet14(in_channels, num_classs):
     """ return a ResNet 18 object
     """
