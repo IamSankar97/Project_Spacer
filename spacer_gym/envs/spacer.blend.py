@@ -63,7 +63,7 @@ class SpacerEnv(btb.env.BaseEnv):
         #   (4)
         self.action_light = {'energy0': [0.001, 0.015], 'Spread': [1.309, 1.8326], 'ro_x': [0, 0.296], 'ro_y': [0, 0.296]}
         #   (2)
-        self.action_clr_ramp = {'Pos_black': [0, 0.2], 'Pos_white': [0.8, 1]}
+        self.action_clr_ramp = {'Pos_black': [0, 0.3], 'Pos_white': [0.7, 1]}
         # Total = 11
 
         self.initial_action = pd.read_csv('/home/mohanty/PycharmProjects/Scribed '
