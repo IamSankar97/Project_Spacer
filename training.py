@@ -139,11 +139,6 @@ class TrainAndLoggingCallback(BaseCallback):
     def _on_step(self):
         if self.n_calls % self.check_freq == 0:
             gen_model_path = os.path.join(self.save_path, 'PPO_gen_model_{}'.format(self.n_calls))
-            disc_model_path = os.path.join(self.save_path, 'Resnet_disc_model_{}.pth'.format(self.n_calls))
-            torch.save(discriminator, disc_model_path)
-            self.model.save(gen_model_path)
-
-            torch.save(discriminator, disc_model_path)
             self.model.save(gen_model_path)
 
             self.logger.record('GAN_loss/ep_disc_loss', self.training_env.get_attr('discriminator_loss')[0])
@@ -219,6 +214,8 @@ class CustomDataset(torch.utils.data.Dataset):
 class Penv(gym.Env):
     def __init__(self, batch_size, episode_length):
         super(Penv, self).__init__()
+        self.target_disc_loss = 1
+        self.target_gen_loss = 1
         self.spacer_data_dir = '/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/'
         self.environments = gym.make("blendtorch-spacer-v2", address=1, real_time=False)
         logging.basicConfig(filename=train_log, level=logging.INFO)
@@ -417,8 +414,8 @@ class Penv(gym.Env):
         fake_spacer = self.match_obs_space(fake_spacer)
         self.state = self.get_state(fake_spacer)
 
-        self.brigtness_cond_fufilled = max(self.brightness_threshold) > self.avg_brightness > \
-                                       min(self.brightness_threshold)
+        self.brigtness_cond_fulfilled = max(self.brightness_threshold) > self.avg_brightness > \
+                                        min(self.brightness_threshold)
 
         #   Check if the action has failed
         failed_action = 1 if np.all(fake_spacer == 0) else 0
@@ -426,10 +423,10 @@ class Penv(gym.Env):
         #   Calculate loss that is mse, kl_divergent, l1_loss and cross_entropy
         criterion_mse = nn.MSELoss()
         criterion_kl = nn.KLDivLoss()
-        actual_brighteness = to_device(torch.from_numpy(self.avg_brightness), device=device)
+        actual_brightness = to_device(torch.from_numpy(self.avg_brightness), device=device)
 
-        self.mse = criterion_mse(self.mean_brightness, actual_brighteness).detach().cpu().numpy().item()
-        self.kl = criterion_kl(self.mean_brightness, actual_brighteness).detach().cpu().numpy().item()
+        self.mse = criterion_mse(self.mean_brightness, actual_brightness).detach().cpu().numpy().item()
+        self.kl = criterion_kl(self.mean_brightness, actual_brightness).detach().cpu().numpy().item()
 
         actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255
         actual_spacer, fake_spacer = to_device(actual_spacer, device), to_device(torch.from_numpy(fake_spacer.copy())
@@ -457,10 +454,10 @@ class Penv(gym.Env):
         self.generator_loss_mean.append(self.crose_entropy)
         self.avg_brightness_mean.append(self.avg_brightness)
         self.done = self.chk_termination()
-
         #   Discriminator Training
-        if self.done and np.mean(self.generator_loss_mean) < 0.1:
-            disc_ls, disc_rl_score, dicc_fk_score = [], [], []
+        if self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss:
+
+            disc_ls, disc_rl_score, disc_fk_score = [], [], []
 
             buffer_act_spacer = torch.stack(list(self.buffer_act_spacer))
             buffer_fake_spacer = torch.stack(list(self.buffer_fake_spacer))
@@ -480,36 +477,41 @@ class Penv(gym.Env):
                 self.epoch += 1
                 disc_ls.append(discriminator_loss)
                 disc_rl_score.append(disc_real_score)
-                dicc_fk_score.append(disc_fake_score)
+                disc_fk_score.append(disc_fake_score)
 
                 print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls),
-                      'disc_rl_score:',
-                      np.mean(disc_rl_score), 'disc_fk_score:', np.mean(dicc_fk_score), end='\n\n')
+                      'disc_rl_score:', np.mean(disc_rl_score), 'disc_fk_score:', np.mean(disc_fk_score), end='\n\n')
 
-                self.disc_fake_score = np.mean(dicc_fk_score)
+                self.disc_fake_score = np.mean(disc_fk_score)
 
                 log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
-                                         'dict_fk_score': np.mean(dicc_fk_score)}, category='disc_perf',
+                                         'dict_fk_score': np.mean(disc_fk_score)}, category='disc_perf',
                                         step=self.epoch)
 
-                if np.mean(disc_ls) < 0.5:
+                if np.mean(disc_ls) < self.target_disc_loss:
                     print('stopping disc training as disc_fk_score {} < 0.5 or discriminator_loss {} < 0.5'.format(
-                        np.mean(dicc_fk_score), np.mean(disc_ls)))
+                        np.mean(disc_fk_score), np.mean(disc_ls)))
                     break
 
             self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(disc_ls), \
-                np.mean(disc_rl_score), np.mean(dicc_fk_score)
+                np.mean(disc_rl_score), np.mean(disc_fk_score)
+
+            torch.save(discriminator, os.path.join(CHECKPOINT_DIR,
+                                                   'Resnet_disc_model_{}_ep{}.pth'.format(self.time_step, self.epoch)))
+
+            self.target_gen_loss -= 0.2
+            self.target_disc_loss -= 0.2
 
         print('generator_acc_mean:', np.mean(self.generator_acc_mean))
 
         #   Logging
         log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'crose_entropy', 'disc_real_score',
-                                       'discriminator_loss', 'disc_fake_score', 'done', 'avg_brightness', 'kl',
-                                       'generator_acc', 'mse', 'reward', 'brigtness_cond_fufilled'])
+                                        'discriminator_loss', 'disc_fake_score', 'done', 'avg_brightness', 'kl',
+                                        'generator_acc', 'mse', 'reward', 'brigtness_cond_fufilled'])
 
         gen_prameters = self.get_attributes(['episodes', 'crose_entropy', 'mse', 'kl', 'l1_loss',
-                                           'avg_brightness', 'reward', 'disc_real_score', 'disc_fake_score',
-                                           'generator_acc', 'brigtness_cond_fufilled'])
+                                             'avg_brightness', 'reward', 'disc_real_score', 'disc_fake_score',
+                                             'generator_acc', 'brigtness_cond_fufilled'])
 
         self.action_paired.update({'failed_action': failed_action})
         log_dict_to_tensorboard(self.action_paired, category='action', step=self.time_step)
@@ -534,14 +536,11 @@ def main():
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
-    model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=0.0001,
+    model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=0.001,
                 batch_size=batch_size, n_steps=episode_length, n_epochs=10, clip_range=.1, gamma=.95, gae_lambda=.9,
                 policy_kwargs=policy_kwargs,
                 seed=seed_, device=device_1)
-    # model = stable_baselines3.PPO.load("train_logs/pre_trained_5k/DDPG_model/PPO_gen_model_5000.zip")
-    # model.set_env(Py_env)
-    # model.policy_kwargs['tensorboard_log'] = LOG_DIR
-    # model.policy_kwargs['device'] = device_0
+
     model.set_logger(new_logger)
 
     #   Multi-processed RL Training
@@ -549,23 +548,6 @@ def main():
                 reset_num_timesteps=False)
     model.save(FINAL_MODEL_DIR + '30k')
     torch.save(discriminator, FINAL_MODEL_DIR + '30k' + 'resnet.pth')
-
-    # ----------------------------Below Code to be Updated-------------------------#
-    # Evaluate the trained agent
-    # env_val = gym.make("env_id", address=num_cpu + 2, real_time=False)
-    # for episode in range(10):
-    #     obs = env_val.reset()
-    #     done = False
-    #     total_reward = 0
-    #     while not done:
-    #         action, _ = model.predict(obs)
-    #         obs, reward, done, info = Py_env.step(np.array([action]))
-    #         time.sleep(0.2)
-    #         total_reward += reward
-    #     print('Total Reward for episode {} is {}'.format(episode, total_reward[0]))
-
-    # mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
-    # print(f'Mean reward: {mean_reward} +/- {std_reward:.2f}')
 
 
 if __name__ == '__main__':
