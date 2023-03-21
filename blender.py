@@ -4,7 +4,8 @@ import bmesh
 import numpy as np
 import sys
 sys.path.append('/home/mohanty/.local/lib/python3.10/site-packages/')
-from blendtorch import btb
+sys.path.append('/home/sankar/blender-3.4.0-linux-x64/pytorch-blender-develop/pkg_blender/')
+# from blendtorch import btb
 from PIL import Image
 
 
@@ -123,17 +124,17 @@ class Blender:
             image = Image.open(file_path)
             return image
 
-        elif engine == 'EEVEE':
-            bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-
-            cam = btb.Camera()
-            off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-            off.set_render_style(shading='RENDERED', overlays=False)
-            image = np.array(off.render())
-
-            image_ = Image.fromarray(image.astype(np.uint8))
-
-            # Save the image to a file
-            image_.save(file_path, format='PNG')
-
-            return image_
+        # elif engine == 'EEVEE':
+        #     bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+        #
+        #     cam = btb.Camera()
+        #     off = btb.OffScreenRenderer(camera=cam, mode='rgb')
+        #     off.set_render_style(shading='RENDERED', overlays=False)
+        #     image = np.array(off.render())
+        #
+        #     image_ = Image.fromarray(image.astype(np.uint8))
+        #
+        #     # Save the image to a file
+        #     image_.save(file_path, format='PNG')
+        #
+        #     return image_
