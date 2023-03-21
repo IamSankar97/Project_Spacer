@@ -26,11 +26,10 @@ import datetime
 import logging
 import torchmetrics
 from collections import deque
-from utils import get_circular_corps, get_orth_actions
+from utils import get_orth_actions
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.tensorboard import SummaryWriter
-import cv2
 
 seed_ = 0
 
@@ -70,65 +69,6 @@ def to_device(data, device):
     if isinstance(data, (list, tuple)):
         return [to_device(x, device) for x in data]
     return data.to(device, non_blocking=True)
-
-
-class DeviceDataLoader():
-    """Wrap a dataloader to move data to a device"""
-
-    def __init__(self, dl, device):
-        self.dl = dl
-        self.device = device
-
-    def __iter__(self):
-        """Yield a batch of data after moving it to device"""
-        for b in self.dl:
-            yield to_device(b, self.device)
-
-    def __len__(self):
-        """Number of batches"""
-        return len(self.dl)
-
-
-def get_trainable_data(image, crop_size, assign_device):
-    crop_images = [torch.from_numpy(np.array([image[i: i + crop_size, j: j + crop_size]])) for i in
-                   range(0, int(crop_size * 2), crop_size)
-                   for j in range(0, int(crop_size * 2), crop_size)]
-    crop_images = torch.stack(crop_images)
-    crop_images = crop_images.float()
-    return to_device(crop_images, assign_device)
-
-
-def binary_accuracy(y_pred, y_true):
-    y_pred_label = (y_pred > 0.7).long()  # round off the predicted probability to the nearest label (0 or 1)
-    correct = torch.eq(y_pred_label, y_true)
-    acc = torch.mean(correct.float())
-    return acc
-
-
-def normalize_loss(loss):
-    return 1 - (loss / (-torch.log(torch.tensor(1e-1))))
-
-
-def augument(image):
-    image = image.filter(ImageFilter.GaussianBlur(0.5))
-    random_number = random.randint(0, 3)
-    if random_number == 0:
-        return image
-    elif random_number == 1:
-        return image.transpose(Image.FLIP_TOP_BOTTOM)
-    elif random_number == 2:
-        image = image.transpose(Image.FLIP_TOP_BOTTOM)
-        return image.transpose(Image.FLIP_LEFT_RIGHT)
-    else:
-        return image.transpose(Image.FLIP_LEFT_RIGHT)
-
-
-def reshape_image(image, img_size=(256, 256)):
-    if image.size == img_size:
-        image = np.asarray(image, dtype=np.float32) / 255
-    else:
-        image = np.asarray(image.resize(img_size), dtype=np.float32) / 255
-    return image
 
 
 device_1 = get_device('1')
@@ -171,18 +111,6 @@ def train_discriminator(real_images, fake_images, opt_d, clip=False):
     return loss.item(), real_score, fake_score
 
 
-def l1_loss(input, target):
-    return torch.mean(torch.abs(input - target))
-
-
-def binary_cross_entropy_loss(predictions, labels):
-    """
-    Computes binary cross entropy loss given predictions and one-hot encoded labels.
-    """
-    predictions = torch.clamp(predictions, min=1e-8, max=1 - 1e-8)
-    return -torch.sum(labels * torch.log(predictions) + (1 - labels) * torch.log(1 - predictions))
-
-
 def log_to_file(log_info, log_file):
     with open(log_file, 'a', newline='') as csvfile2:
         writer = csv.DictWriter(csvfile2, fieldnames=list(log_info.keys()))
@@ -190,49 +118,6 @@ def log_to_file(log_info, log_file):
             writer.writeheader()
 
         writer.writerow(log_info)
-
-
-def find_range(number, dictionary):
-    for key, value in dictionary.items():
-        if value[0] <= number <= value[1]:
-            return key
-    return None
-
-
-def _center_crop_to_square(img: Image):
-    width, height = img.size
-    size = min(width, height)
-    left = (width - size) / 2
-    top = (height - size) / 2
-    right = (width + size) / 2
-    bottom = (height + size) / 2
-    return img.crop((left, top, right, bottom))
-
-
-def linear_schedule(initial_value: float) -> Callable[[float], float]:
-    def func(progress_remaining: float) -> float:
-        return 0.00001
-
-    return func
-
-
-def get_fake_sp(obs):
-    obs = np.asarray(augument(obs), dtype=np.uint8)
-    return obs
-
-
-def center_ring(actual_spacer):
-    circles = cv2.HoughCircles(actual_spacer, cv2.HOUGH_GRADIENT, 1, 20, param1=30, param2=100, minRadius=0,
-                               maxRadius=0)
-    height, width = actual_spacer.shape
-    center_x = width // 2
-    center_y = height // 2
-    x, y, r = np.uint16(np.around(circles[0][0]))
-    delta_x = center_x - x
-    delta_y = center_y - y
-    M = np.float32([[1, 0, delta_x], [0, 1, delta_y]])
-    centered_ring = cv2.warpAffine(actual_spacer, M, (width, height))
-    return centered_ring
 
 
 class TrainAndLoggingCallback(BaseCallback):
@@ -555,7 +440,7 @@ class Penv(gym.Env):
         self.generator_acc_mean.append(generator_acc)
         self.generator_loss_mean.append(self.crose_entropy)
         self.done_cond_mean.append(self.done_cond)
-        self.l1_ = l1_loss(fake_spacer, actual_spacer).detach().cpu().numpy().item()
+        self.l1_ = torch.mean(torch.abs(fake_spacer-actual_spacer)).detach().cpu().numpy().item()
         self.done = self.chk_termination()
 
         if self.done and np.mean(self.generator_loss_mean) < 0.1:  # == 0 and self.steps != 1:

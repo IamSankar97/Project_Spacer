@@ -210,3 +210,25 @@ def get_orth_actions(no_of_actions, action_range=(-1, 1)):
 
     # print the orthogonal combinations
     return orthogonal_combinations
+
+
+def reshape_image(image, img_size=(256, 256)):
+    if image.size == img_size:
+        image = np.asarray(image, dtype=np.float32) / 255
+    else:
+        image = np.asarray(image.resize(img_size), dtype=np.float32) / 255
+    return image
+
+
+def center_ring(actual_spacer):
+    circles = cv2.HoughCircles(actual_spacer, cv2.HOUGH_GRADIENT, 1, 20, param1=30, param2=100, minRadius=0,
+                               maxRadius=0)
+    height, width = actual_spacer.shape
+    center_x = width // 2
+    center_y = height // 2
+    x, y, r = np.uint16(np.around(circles[0][0]))
+    delta_x = center_x - x
+    delta_y = center_y - y
+    M = np.float32([[1, 0, delta_x], [0, 1, delta_y]])
+    centered_ring = cv2.warpAffine(actual_spacer, M, (width, height))
+    return centered_ring
