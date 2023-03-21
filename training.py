@@ -16,18 +16,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # import torchvision
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import DummyVecEnv
 import datetime
 import logging
 import torchmetrics
 from collections import deque
-from utils import get_orth_actions
+from utils import get_orth_actions, is_loss_stagnated_or_increasing
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.tensorboard import SummaryWriter
+from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
 
 seed_ = 0
 
@@ -127,10 +130,13 @@ def log_to_file(log_info, log_file):
 
 class TrainAndLoggingCallback(BaseCallback):
 
-    def __init__(self, check_freq, save_path, verbose=1):
+    def __init__(self, check_freq, save_path, patience=4000, verbose=1):
         super(TrainAndLoggingCallback, self).__init__(verbose)
         self.check_freq = check_freq
         self.save_path = save_path
+        self.patience = patience
+        self.best_mean_reward = -float('inf')
+        self.steps_since_best_reward = 0
 
     def _init_callback(self):
         if self.save_path is not None:
@@ -150,6 +156,8 @@ class TrainAndLoggingCallback(BaseCallback):
                                np.mean(self.training_env.get_attr('avg_brightness_mean')))
             self.logger.record('rollout/avg_brightness', self.training_env.get_attr('avg_brightness')[0])
             self.logger.record('rollout/ep_end_reward', self.training_env.get_attr('reward')[0])
+
+            return True
 
 
 class CustomImageExtractor(BaseFeaturesExtractor):
@@ -368,7 +376,7 @@ class Penv(gym.Env):
             log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
                                      'dict_fk_score': np.mean(dicc_fk_score)}, category='disc_perf', step=self.epoch)
 
-            if np.mean(disc_ls) < 0.1:
+            if np.mean(disc_ls) < 0.005:
                 print('stopping pretraining as disc_fk_score {} > 0.95 and discriminator_loss {}'.format(
                     np.mean(dicc_fk_score), np.mean(disc_ls)))
                 break
@@ -456,41 +464,46 @@ class Penv(gym.Env):
         self.done = self.chk_termination()
         #   Discriminator Training
         if self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss:
-
             disc_ls, disc_rl_score, disc_fk_score = [], [], []
 
             buffer_act_spacer = torch.stack(list(self.buffer_act_spacer))
             buffer_fake_spacer = torch.stack(list(self.buffer_fake_spacer))
 
-            #   Generate a random permutation of indices along the second dimension
-            indices0, indices1 = torch.randperm(buffer_act_spacer.size(1), device=device_1), \
-                torch.randperm(buffer_fake_spacer.size(1), device=device_1)
+            while np.mean(disc_ls) < self.target_disc_loss:
 
-            #   Use the index_select function to shuffle the tensor along the second dimension
-            buffer_act_spacer, buffer_fake_spacer = torch.index_select(buffer_act_spacer, 1, indices0), \
-                torch.index_select(buffer_fake_spacer, 1, indices1)
+                #   Generate a random permutation of indices along the second dimension
+                indices0, indices1 = torch.randperm(buffer_act_spacer.size(1), device=device_1), \
+                    torch.randperm(buffer_fake_spacer.size(1), device=device_1)
 
-            for actual_spacer_n, fake_spacer_n in zip(buffer_act_spacer, buffer_fake_spacer):
-                discriminator_loss, disc_real_score, disc_fake_score = train_discriminator(actual_spacer_n,
-                                                                                           fake_spacer_n, opt_d,
-                                                                                           clip=True)
-                self.epoch += 1
-                disc_ls.append(discriminator_loss)
-                disc_rl_score.append(disc_real_score)
-                disc_fk_score.append(disc_fake_score)
+                #   Use the index_select function to shuffle the tensor along the second dimension
+                buffer_act_spacer, buffer_fake_spacer = torch.index_select(buffer_act_spacer, 1, indices0), \
+                    torch.index_select(buffer_fake_spacer, 1, indices1)
 
-                print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls),
-                      'disc_rl_score:', np.mean(disc_rl_score), 'disc_fk_score:', np.mean(disc_fk_score), end='\n\n')
+                for actual_spacer_n, fake_spacer_n in zip(buffer_act_spacer, buffer_fake_spacer):
+                    discriminator_loss, disc_real_score, disc_fake_score = train_discriminator(actual_spacer_n,
+                                                                                               fake_spacer_n, opt_d,
+                                                                                               clip=True)
+                    self.epoch += 1
+                    disc_ls.append(discriminator_loss)
+                    disc_rl_score.append(disc_real_score)
+                    disc_fk_score.append(disc_fake_score)
 
-                self.disc_fake_score = np.mean(disc_fk_score)
+                    print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls),
+                          'disc_rl_score:', np.mean(disc_rl_score), 'disc_fk_score:', np.mean(disc_fk_score),
+                          end='\n\n')
 
-                log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
-                                         'dict_fk_score': np.mean(disc_fk_score)}, category='disc_perf',
-                                        step=self.epoch)
+                    self.disc_fake_score = np.mean(disc_fk_score)
 
-                if np.mean(disc_ls) < self.target_disc_loss:
-                    print('stopping disc training as disc_fk_score {} < 0.5 or discriminator_loss {} < 0.5'.format(
-                        np.mean(disc_fk_score), np.mean(disc_ls)))
+                    log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
+                                             'dict_fk_score': np.mean(disc_fk_score)}, category='disc_perf',
+                                            step=self.epoch)
+
+                    if np.mean(disc_ls) < self.target_disc_loss:
+                        print('stopping disc training as discriminator_loss {} < {}'.format(np.mean(disc_ls),
+                                                                                            self.target_disc_loss))
+                        break
+
+                if is_loss_stagnated_or_increasing(disc_ls, window_size=self.episode_length, threshold=1e-3):
                     break
 
             self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(disc_ls), \
@@ -502,7 +515,7 @@ class Penv(gym.Env):
             self.target_gen_loss -= 0.2
             self.target_disc_loss -= 0.2
 
-        print('generator_acc_mean:', np.mean(self.generator_acc_mean))
+        print('generator_acc_mean:', np.mean(self.generator_acc_mean), end='\n')
 
         #   Logging
         log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'crose_entropy', 'disc_real_score',
@@ -523,16 +536,22 @@ class Penv(gym.Env):
 def main():
     batch_size = 2
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
-    episode_length = batch_size
+    episode_length = batch_size*34
     print("batch_size:", batch_size, 'episode_length:', episode_length)
-    py_env = Penv(batch_size=batch_size, episode_length=episode_length)
+    py_env = Monitor(Penv(batch_size=batch_size, episode_length=episode_length))
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
     policy_kwargs = dict(net_arch=dict(pi=[100, 64, 32], vf=[100, 64, 32]),
                          features_extractor_class=CustomImageExtractor)
 
-    callback = TrainAndLoggingCallback(check_freq=episode_length, save_path=CHECKPOINT_DIR)
+    logging_callback = TrainAndLoggingCallback(check_freq=episode_length, save_path=CHECKPOINT_DIR)
+
+    # Separate evaluation env
+    # Stop training if there is no improvement after more than 3 evaluations
+    # stop_train_callback = StopTrainingOnNoModelImprovement(max_no_improvement_evals=3, min_evals=2, verbose=1)
+    # #   Evaluate the call back every 3000 steps
+    # eval_callback = EvalCallback(py_env, eval_freq=2, callback_after_eval=stop_train_callback, verbose=1)
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
@@ -544,7 +563,7 @@ def main():
     model.set_logger(new_logger)
 
     #   Multi-processed RL Training
-    model.learn(total_timesteps=50000, callback=callback, log_interval=1, tb_log_name="first_run",
+    model.learn(total_timesteps=50000, callback=logging_callback, log_interval=1, tb_log_name="first_run",
                 reset_num_timesteps=False)
     model.save(FINAL_MODEL_DIR + '30k')
     torch.save(discriminator, FINAL_MODEL_DIR + '30k' + 'resnet.pth')
