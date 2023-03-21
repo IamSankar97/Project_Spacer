@@ -69,6 +69,13 @@ def to_device(data, device):
     return data.to(device, non_blocking=True)
 
 
+def get_attribute_dict(*args):
+    # Create a new dictionary and populate it with argument names and their values
+    attr_dict = {arg_name: arg_value for arg_name, arg_value in zip([arg_name for arg_name in args], args)}
+
+    return attr_dict
+
+
 device_1 = get_device('1')
 device_0 = device_1  # get_device('0')
 discriminator = resnet.resnet10(1, 2)
@@ -223,7 +230,8 @@ class Penv(gym.Env):
         self.actual_dataloader = self.get_image_dataloader()
         # self.initialize_discriminator(no_of_stps=500)
         # derived by calculating avg value over all the available fake images of shape 64*64
-        self.done_threshold = np.array([0.85, 0.30])
+        self.brightness_threshold = np.array([0.85, 0.30])
+        self.mean_brightness = torch.mean(to_device(torch.from_numpy(self.brightness_threshold), device=device_0))
         # spacer data
         self.state = [32]
         self.spacer_data = os.listdir(self.spacer_data_dir)
@@ -241,6 +249,10 @@ class Penv(gym.Env):
         self.generator_loss_mean = []
         self.buffer_act_spacer = deque(maxlen=self.episode_length)
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
+
+    def get_attributes(self, attr_names):
+        return {attr_name: getattr(self, attr_name) for attr_name in dir(self) if
+                not callable(getattr(self, attr_name)) and not attr_name.startswith("__") and attr_name in attr_names}
 
     def get_fake_data(self, action=None, reset=False):
         if reset:
@@ -386,10 +398,11 @@ class Penv(gym.Env):
 
     def step(self, action, device=device_0):
         global disc_ls, disc_fk_sc, disc_rl_sc, discriminator_loss
+
+        #   Update and reset attributes
         self.steps += 1
         self.reward = 0
         self.time_step += 1
-        failed_action = 0
         if self.steps == 1:
             self.generator_loss_mean = []
             self.generator_acc_mean = []
@@ -397,54 +410,69 @@ class Penv(gym.Env):
 
         #   Take action and collect observations
         actual_spacer, fake_spacer, info = self.get_data(action)
+
         self.avg_brightness = np.array(np.mean(fake_spacer, axis=(0, 1, 2)) / 255)
+
+        #   Get state for RL
         fake_spacer = self.match_obs_space(fake_spacer)
         self.state = self.get_state(fake_spacer)
-        don_cond_pixel = max(self.done_threshold) > self.avg_brightness > min(self.done_threshold)
-        if np.all(fake_spacer == 0):
-            failed_action = 1
-            print('failed:', self.action_paired)
+
+        self.brigtness_cond_fufilled = max(self.brightness_threshold) > self.avg_brightness > \
+                                       min(self.brightness_threshold)
+
+        #   Check if the action has failed
+        failed_action = 1 if np.all(fake_spacer == 0) else 0
+
+        #   Calculate loss that is mse, kl_divergent, l1_loss and cross_entropy
         criterion_mse = nn.MSELoss()
         criterion_kl = nn.KLDivLoss()
-        x, y = torch.mean(to_device(torch.from_numpy(self.done_threshold), device=device)), \
-            to_device(torch.from_numpy(self.avg_brightness), device=device)
-        self.mse = criterion_mse(x, y).detach().cpu().numpy().item()
-        self.kl = criterion_kl(x, y).detach().cpu().numpy().item()
+        actual_brighteness = to_device(torch.from_numpy(self.avg_brightness), device=device)
+
+        self.mse = criterion_mse(self.mean_brightness, actual_brighteness).detach().cpu().numpy().item()
+        self.kl = criterion_kl(self.mean_brightness, actual_brighteness).detach().cpu().numpy().item()
 
         actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255
-        actual_spacer = to_device(actual_spacer, device)
-        fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), device)
+        actual_spacer, fake_spacer = to_device(actual_spacer, device), to_device(torch.from_numpy(fake_spacer.copy())
+                                                                                 .unsqueeze(1).float(), device)
 
-        self.buffer_act_spacer.append(actual_spacer)
-        self.buffer_fake_spacer.append(fake_spacer)
+        self.l1_loss = torch.mean(torch.abs(fake_spacer - actual_spacer)).detach().cpu().numpy().item()
 
-        #   Getting Generator loss, Try to fool the discriminator
+        #   Getting Generator loss, by trying to fool the discriminator
         discriminator.eval()
         with torch.no_grad():
             preds = discriminator(fake_spacer)
-        # fake is told as real
+        #   Fake is termed as real
         targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(), device)
 
         self.crose_entropy = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
+        self.generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
+
+        #   Caculate Reward
         self.reward = -self.crose_entropy - self.mse - (0.1 * self.kl)
-        generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
-        self.generator_acc_mean.append(generator_acc)
+
+        #   Collect Datas in lists
+        self.buffer_act_spacer.append(actual_spacer)
+        self.buffer_fake_spacer.append(fake_spacer)
+        self.generator_acc_mean.append(self.generator_acc)
         self.generator_loss_mean.append(self.crose_entropy)
         self.avg_brightness_mean.append(self.avg_brightness)
-        self.l1_loss = torch.mean(torch.abs(fake_spacer - actual_spacer)).detach().cpu().numpy().item()
         self.done = self.chk_termination()
 
-        if self.done and np.mean(self.generator_loss_mean) < 0.1:  # == 0 and self.steps != 1:
+        #   Discriminator Training
+        if self.done and np.mean(self.generator_loss_mean) < 0.1:
             disc_ls, disc_rl_score, dicc_fk_score = [], [], []
+
             buffer_act_spacer = torch.stack(list(self.buffer_act_spacer))
             buffer_fake_spacer = torch.stack(list(self.buffer_fake_spacer))
-            # Generate a random permutation of indices along the second dimension
+
+            #   Generate a random permutation of indices along the second dimension
             indices0, indices1 = torch.randperm(buffer_act_spacer.size(1), device=device_1), \
                 torch.randperm(buffer_fake_spacer.size(1), device=device_1)
 
-            # Use the index_select function to shuffle the tensor along the second dimension
+            #   Use the index_select function to shuffle the tensor along the second dimension
             buffer_act_spacer, buffer_fake_spacer = torch.index_select(buffer_act_spacer, 1, indices0), \
                 torch.index_select(buffer_fake_spacer, 1, indices1)
+
             for actual_spacer_n, fake_spacer_n in zip(buffer_act_spacer, buffer_fake_spacer):
                 discriminator_loss, disc_real_score, disc_fake_score = train_discriminator(actual_spacer_n,
                                                                                            fake_spacer_n, opt_d,
@@ -453,9 +481,11 @@ class Penv(gym.Env):
                 disc_ls.append(discriminator_loss)
                 disc_rl_score.append(disc_real_score)
                 dicc_fk_score.append(disc_fake_score)
+
                 print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls),
                       'disc_rl_score:',
                       np.mean(disc_rl_score), 'disc_fk_score:', np.mean(dicc_fk_score), end='\n\n')
+
                 self.disc_fake_score = np.mean(dicc_fk_score)
 
                 log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
@@ -471,18 +501,17 @@ class Penv(gym.Env):
                 np.mean(disc_rl_score), np.mean(dicc_fk_score)
 
         print('generator_acc_mean:', np.mean(self.generator_acc_mean))
-        log_info = {"timestep": self.time_step, "episode": self.episodes, "steps": self.steps,
-                    "l1_loss": self.l1_loss, "entp_loss": self.crose_entropy, "disc_loss": self.discriminator_loss,
-                    "real_score": self.disc_real_score, "fake_score": self.disc_fake_score,
-                    "episode_terminate": self.done, 'don_cond_pixel': don_cond_pixel,
-                    'generator_acc': generator_acc, 'avg_brightness': self.avg_brightness, 'mse': self.mse,
-                    "gen_loss": -self.reward, "reward": self.reward}
+
+        #   Logging
+        log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'crose_entropy', 'disc_real_score',
+                                       'discriminator_loss', 'disc_fake_score', 'done', 'avg_brightness', 'kl',
+                                       'generator_acc', 'mse', 'reward', 'brigtness_cond_fufilled'])
+
+        gen_prameters = self.get_attributes(['episodes', 'crose_entropy', 'mse', 'kl', 'l1_loss',
+                                           'avg_brightness', 'reward', 'disc_real_score', 'disc_fake_score',
+                                           'generator_acc', 'brigtness_cond_fufilled'])
 
         self.action_paired.update({'failed_action': failed_action})
-        gen_prameters = {"timestep": self.episodes, "entp_loss": self.crose_entropy,
-                         'mse': self.mse, 'kl': self.kl, "l1_loss": self.l1_loss, 'avg_brightness': self.avg_brightness,
-                         "reward": self.reward, "real_score": self.disc_real_score, "fake_score": self.disc_fake_score,
-                         'generator_acc': generator_acc}
         log_dict_to_tensorboard(self.action_paired, category='action', step=self.time_step)
         log_dict_to_tensorboard(gen_prameters, category='gen_param', step=self.time_step)
         log_to_file(log_info, train_log)
