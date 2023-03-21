@@ -4,7 +4,6 @@ import numpy as np
 import os
 import sys
 import random
-from PIL import Image, ImageFilter
 from collections import OrderedDict
 from stable_baselines3 import PPO
 import pandas as pd
@@ -21,7 +20,6 @@ from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.callbacks import BaseCallback
-from typing import Callable
 import datetime
 import logging
 import torchmetrics
@@ -146,8 +144,9 @@ class TrainAndLoggingCallback(BaseCallback):
             self.logger.record('GAN_loss/generator_acc_mean', np.mean(self.training_env.get_attr('generator_acc_mean')))
             self.logger.record('GAN_loss/ep_disc_rl_score', self.training_env.get_attr('disc_real_score')[0])
             self.logger.record('GAN_loss/ep_disc_fk_score', self.training_env.get_attr('disc_fake_score')[0])
-            self.logger.record('GAN_loss/done_cond_mean', np.mean(self.training_env.get_attr('done_cond_mean')))
-            self.logger.record('rollout/done_cond', self.training_env.get_attr('done_cond')[0])
+            self.logger.record('GAN_loss/avg_brightness_mean',
+                               np.mean(self.training_env.get_attr('avg_brightness_mean')))
+            self.logger.record('rollout/avg_brightness', self.training_env.get_attr('avg_brightness')[0])
             self.logger.record('rollout/ep_end_reward', self.training_env.get_attr('reward')[0])
 
 
@@ -175,7 +174,7 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         self.linear0 = nn.Linear(n_flatten_img, 100)
         self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
         self.dropout1 = nn.Dropout(p=0.3)
-        self.linear2 = nn.Linear(features_dim * 3, features_dim-self.n_scalar)
+        self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         scalar_obs = observations['scalar']
@@ -213,40 +212,34 @@ class CustomDataset(torch.utils.data.Dataset):
 class Penv(gym.Env):
     def __init__(self, batch_size, episode_length):
         super(Penv, self).__init__()
-        self.epoch = 0
-        self.action_paired = {}
         self.spacer_data_dir = '/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/'
         self.environments = gym.make("blendtorch-spacer-v2", address=1, real_time=False)
-        self.environments.reset()
-        # logging must be after environment generation
         logging.basicConfig(filename=train_log, level=logging.INFO)
+        self.environments.reset()
+        self.action_paired = {}
+        # logging must be after environment generation
         self.action_space = spaces.Box(-1, 1, shape=(11,))
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.actual_dataloader = self.get_image_dataloader()
-        self.initialize_discriminator(no_of_stps=500)
-        self.done = 0
-        self.l1_ = 0
-        self.crose_entropy = 0
-        self.done_cond = 0
-        self.done_cond_mean = []
+        # self.initialize_discriminator(no_of_stps=500)
+        # derived by calculating avg value over all the available fake images of shape 64*64
+        self.done_threshold = np.array([0.85, 0.30])
+        # spacer data
+        self.state = [32]
+        self.spacer_data = os.listdir(self.spacer_data_dir)
+        self.episode_length = episode_length
+        self.generator_acc_mean = []
+        self.avg_brightness_mean = []
+        self.time_step = -1
+        self.episodes = 0
+        self.avg_brightness = 0
+        self.epoch = 0
         self.disc_fake_score = 0
         self.disc_real_score = 0
         self.discriminator_loss = 0
-        self.done_threshold = np.array([0.85, 0.30]) # derived by calculating max avg value over all the available actual
-        # spacer data
-        self.state = [32]
-        self.reward = 0
-        self.spacer_data = os.listdir(self.spacer_data_dir)
-        self.episodes = 0
-        self.episode_length = episode_length
-        self.steps = 0
-        self.done_cond_list = []
-        self.generator_acc_mean = []
-        self.done_cond_mean = []
-        self.time_step = -1
         self.batch_size = batch_size
-        self.generator_loss_mean = deque(maxlen=self.episode_length)
-        self.buffer_act_spacer = deque(maxlen=self.episode_length)  # * len(self.observation_space.spaces))
+        self.generator_loss_mean = []
+        self.buffer_act_spacer = deque(maxlen=self.episode_length)
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
 
     def get_fake_data(self, action=None, reset=False):
@@ -292,7 +285,6 @@ class Penv(gym.Env):
         return dataloader
 
     def chk_termination(self):
-        # max(self.done_threshold) > self.done_cond > min(self.done_threshold) and
         if self.steps == self.episode_length:
             return True
         else:
@@ -324,7 +316,6 @@ class Penv(gym.Env):
         return fake_spacer
 
     def initialize_discriminator(self, no_of_stps=10, device=device_0):
-        global actual_spacer
         dicc_fk_score, disc_rl_score, disc_ls = [], [], []
         ortho_actions = get_orth_actions(self.action_space.shape[0])
 
@@ -379,7 +370,7 @@ class Penv(gym.Env):
 
         obs_imgs = np.expand_dims(fake_spacer, axis=-1)
         obs_imgs = OrderedDict(zip(list(self.observation_space.spaces.keys())[:-1], obs_imgs))
-        obs_imgs['scalar'] = self.done_cond
+        obs_imgs['scalar'] = self.avg_brightness
         return obs_imgs
 
     def reset(self):
@@ -394,7 +385,7 @@ class Penv(gym.Env):
         return self.state
 
     def step(self, action, device=device_0):
-        global done_cond_lst, disc_ls, disc_fk_sc, disc_rl_sc, discriminator_loss
+        global disc_ls, disc_fk_sc, disc_rl_sc, discriminator_loss
         self.steps += 1
         self.reward = 0
         self.time_step += 1
@@ -402,25 +393,25 @@ class Penv(gym.Env):
         if self.steps == 1:
             self.generator_loss_mean = []
             self.generator_acc_mean = []
-            self.done_cond_mean = []
+            self.avg_brightness_mean = []
 
         #   Take action and collect observations
         actual_spacer, fake_spacer, info = self.get_data(action)
-        self.done_cond = np.array(np.mean(fake_spacer, axis=(0, 1, 2)) / 255)
+        self.avg_brightness = np.array(np.mean(fake_spacer, axis=(0, 1, 2)) / 255)
         fake_spacer = self.match_obs_space(fake_spacer)
         self.state = self.get_state(fake_spacer)
-        don_cond_pixel = max(self.done_threshold) > self.done_cond > min(self.done_threshold)
+        don_cond_pixel = max(self.done_threshold) > self.avg_brightness > min(self.done_threshold)
         if np.all(fake_spacer == 0):
             failed_action = 1
             print('failed:', self.action_paired)
         criterion_mse = nn.MSELoss()
         criterion_kl = nn.KLDivLoss()
-        x, y = torch.mean(to_device(torch.from_numpy(self.done_threshold), device=device)),\
-            to_device(torch.from_numpy(self.done_cond), device=device)
+        x, y = torch.mean(to_device(torch.from_numpy(self.done_threshold), device=device)), \
+            to_device(torch.from_numpy(self.avg_brightness), device=device)
         self.mse = criterion_mse(x, y).detach().cpu().numpy().item()
         self.kl = criterion_kl(x, y).detach().cpu().numpy().item()
 
-        actual_spacer, fake_spacer = actual_spacer , fake_spacer / 255
+        actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255
         actual_spacer = to_device(actual_spacer, device)
         fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), device)
 
@@ -435,12 +426,12 @@ class Penv(gym.Env):
         targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(), device)
 
         self.crose_entropy = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
-        self.reward = -self.crose_entropy - self.mse - (0.1*self.kl)
+        self.reward = -self.crose_entropy - self.mse - (0.1 * self.kl)
         generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
         self.generator_acc_mean.append(generator_acc)
         self.generator_loss_mean.append(self.crose_entropy)
-        self.done_cond_mean.append(self.done_cond)
-        self.l1_ = torch.mean(torch.abs(fake_spacer-actual_spacer)).detach().cpu().numpy().item()
+        self.avg_brightness_mean.append(self.avg_brightness)
+        self.l1_loss = torch.mean(torch.abs(fake_spacer - actual_spacer)).detach().cpu().numpy().item()
         self.done = self.chk_termination()
 
         if self.done and np.mean(self.generator_loss_mean) < 0.1:  # == 0 and self.steps != 1:
@@ -456,12 +447,14 @@ class Penv(gym.Env):
                 torch.index_select(buffer_fake_spacer, 1, indices1)
             for actual_spacer_n, fake_spacer_n in zip(buffer_act_spacer, buffer_fake_spacer):
                 discriminator_loss, disc_real_score, disc_fake_score = train_discriminator(actual_spacer_n,
-                                                                                       fake_spacer_n, opt_d, clip=True)
+                                                                                           fake_spacer_n, opt_d,
+                                                                                           clip=True)
                 self.epoch += 1
                 disc_ls.append(discriminator_loss)
                 disc_rl_score.append(disc_real_score)
                 dicc_fk_score.append(disc_fake_score)
-                print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls), 'disc_rl_score:',
+                print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls),
+                      'disc_rl_score:',
                       np.mean(disc_rl_score), 'disc_fk_score:', np.mean(dicc_fk_score), end='\n\n')
                 self.disc_fake_score = np.mean(dicc_fk_score)
 
@@ -474,20 +467,20 @@ class Penv(gym.Env):
                         np.mean(dicc_fk_score), np.mean(disc_ls)))
                     break
 
-            self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(disc_ls),\
+            self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(disc_ls), \
                 np.mean(disc_rl_score), np.mean(dicc_fk_score)
 
         print('generator_acc_mean:', np.mean(self.generator_acc_mean))
         log_info = {"timestep": self.time_step, "episode": self.episodes, "steps": self.steps,
-                    "l1_loss": self.l1_, "entp_loss": self.crose_entropy, "disc_loss": self.discriminator_loss,
+                    "l1_loss": self.l1_loss, "entp_loss": self.crose_entropy, "disc_loss": self.discriminator_loss,
                     "real_score": self.disc_real_score, "fake_score": self.disc_fake_score,
                     "episode_terminate": self.done, 'don_cond_pixel': don_cond_pixel,
-                    'generator_acc': generator_acc, 'done': self.done_cond, 'mse': self.mse,
+                    'generator_acc': generator_acc, 'avg_brightness': self.avg_brightness, 'mse': self.mse,
                     "gen_loss": -self.reward, "reward": self.reward}
 
         self.action_paired.update({'failed_action': failed_action})
         gen_prameters = {"timestep": self.episodes, "entp_loss": self.crose_entropy,
-                         'mse': self.mse, 'kl': self.kl, "l1_loss": self.l1_, 'done': self.done_cond,
+                         'mse': self.mse, 'kl': self.kl, "l1_loss": self.l1_loss, 'avg_brightness': self.avg_brightness,
                          "reward": self.reward, "real_score": self.disc_real_score, "fake_score": self.disc_fake_score,
                          'generator_acc': generator_acc}
         log_dict_to_tensorboard(self.action_paired, category='action', step=self.time_step)
@@ -498,10 +491,10 @@ class Penv(gym.Env):
 
 def main():
     batch_size = 2
-    episode_length = batch_size #* 34  # Roll_out Buffer Size/ How many steps in an episode*50
+    # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
+    episode_length = batch_size
     print("batch_size:", batch_size, 'episode_length:', episode_length)
-    discr_train_freq = episode_length
-    Py_env = Penv(batch_size=batch_size, episode_length=episode_length)
+    py_env = Penv(batch_size=batch_size, episode_length=episode_length)
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
@@ -512,7 +505,7 @@ def main():
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
-    model = PPO('MultiInputPolicy', Py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=0.0001,
+    model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=0.0001,
                 batch_size=batch_size, n_steps=episode_length, n_epochs=10, clip_range=.1, gamma=.95, gae_lambda=.9,
                 policy_kwargs=policy_kwargs,
                 seed=seed_, device=device_1)
