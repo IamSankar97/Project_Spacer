@@ -232,3 +232,19 @@ def center_ring(actual_spacer):
     M = np.float32([[1, 0, delta_x], [0, 1, delta_y]])
     centered_ring = cv2.warpAffine(actual_spacer, M, (width, height))
     return centered_ring
+
+
+def is_loss_stagnated_or_increasing(loss_list, window_size=100, threshold=1e-4):
+    """
+    Check if the loss is stagnant or increasing by taking the last `window_size` entries of the `loss_list`.
+    Returns True if the standard deviation of the last `window_size` entries is below `threshold`,
+    indicating that the loss is stagnant, or if the current loss value is greater than or equal to the minimum
+    loss value observed over the last `window_size` iterations, indicating that the loss is increasing.
+    """
+    last_losses = loss_list[-window_size:]
+    std_dev = np.std(last_losses)
+    min_loss = min(last_losses)
+    if std_dev < threshold or loss_list[-1] >= min_loss:
+        return True
+    else:
+        return False
