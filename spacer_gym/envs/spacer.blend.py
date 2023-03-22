@@ -61,21 +61,22 @@ class SpacerEnv(btb.env.BaseEnv):
         #   (1)
         self.action_light_cmn = {"value": [0.8, 1]}
         #   (4)
-        self.action_light = {'energy0': [0.001, 0.015], 'Spread': [1.309, 1.8326], 'ro_x': [0, 0.296], 'ro_y': [0, 0.296]}
+        self.action_light = {'energy0': [0.001, 0.015], 'Spread': [1.309, 1.8326], 'ro_x': [0, 0.296],
+                             'ro_y': [0, 0.296]}
         #   (2)
         self.action_clr_ramp = {'Pos_black': [0, 0.3], 'Pos_white': [0.7, 1]}
-        # Total = 11
 
-        self.initial_action = pd.read_csv('/home/mohanty/PycharmProjects/Scribed '
-                                          'PPO_1light/spacer_gym/envs/initial_act_Less_then4.csv', header=None)
-        self.ortho_actions = pd.read_csv('/home/mohanty/PycharmProjects/Scribed '
-                                         'spacer_1light/spacer_gym/envs/ortho1.csv', header=None)
-
-        self.reset_action = {'specular': 0.5, 'ior': 2.3, 'roughness': 0.2, 'factor': 0.96, "value": 0.8,
+        #   (4)
+        self.action_noise = {'Scale': [0, 100], 'detail': [0,10], 'noise_roughness': [0.1, 1.0],
+                             "Distortion": [100, 10000]}
+        # Total = 15
+        self.reset_action = {'specular': 0.5, 'ior': 2.3, 'roughness': 0.2, "value": 0.8,
                              'energy0': 0.005, 'Spread': 1.5708, 'ro_x': 0, 'ro_y': 0, 'Pos_black': 0.225,
-                             'Pos_white': 0.9, 'ro_z': 0}
+                             'Pos_white': 0.9, 'ro_z': 0, 'scale': 4, 'detail': 10, 'noise_roughness': 0.8,
+                             "Distortion": 5000}
+
         self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light_cmn, **self.action_light,
-                             **self.action_clr_ramp}
+                             **self.action_clr_ramp, **self.action_noise}
         self.action_keys = list(self.action_bound.keys())
         self.episodes, self.step, self.total_step = -2, 0, 0
         self.update_scene()
@@ -258,6 +259,10 @@ class SpacerEnv(btb.env.BaseEnv):
         actions_inverse_clr_ramp = self.inverse_normalization(self.action_clr_ramp)
         self.update_clr_ramp(actions_inverse_clr_ramp['Pos_black'], actions_inverse_clr_ramp['Pos_white'])
 
+        action_inverse_noise = self.inverse_normalization(self.action_noise)
+        self.update_noise_texture(action_inverse_noise['Scale'], action_inverse_noise['detail'],
+                                  action_inverse_noise['noise_roughness'], action_inverse_noise['Distortion'])
+
         self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_cmn_ligt,
                                 **actions_inverse_specifice_ligt, **actions_inverse_clr_ramp}
 
@@ -274,9 +279,10 @@ class SpacerEnv(btb.env.BaseEnv):
         mat_nodes.inputs['IOR'].default_value = ior
         mat_nodes.inputs['Roughness'].default_value = roughness
 
-    def update_noise_texture(self, Scale, n_roughness, Distortion):
+    def update_noise_texture(self, Scale, Detail, n_roughness, Distortion):
         texture_node = self.texture_nodes['Noise Texture']
         texture_node.inputs['Scale'].default_value = Scale
+        texture_node.inputs['Detail'].default_value = Detail
         texture_node.inputs['Roughness'].default_value = n_roughness
         texture_node.inputs['Distortion'].default_value = Distortion
 
