@@ -181,7 +181,6 @@ class SpacerEnv(btb.env.BaseEnv):
                                        self.action_bound[key][1]) for i, key in enumerate(self.action_bound.keys())}
         self.reset_action = clipped_action
         self.update_mat(self.reset_action['specular'], self.reset_action['ior'], self.reset_action['roughness'])
-        self.update_Mix(self.reset_action['Factor'])
         self.update_lights(self.reset_action['value'], self.reset_action['energy0'],
                            self.reset_action['Spread'], self.reset_action['ro_x'], self.reset_action['ro_y'])
 
@@ -247,9 +246,6 @@ class SpacerEnv(btb.env.BaseEnv):
         action_inverse_mat = self.inverse_normalization(self.action_Material)
         self.update_mat(action_inverse_mat['specular'], action_inverse_mat['ior'], action_inverse_mat['roughness'])
 
-        action_inverse_mix = self.inverse_normalization(self.action_mix)
-        self.update_Mix(action_inverse_mix['Factor'])
-
         actions_inverse_cmn_ligt = self.inverse_normalization(self.action_light_cmn)
         actions_inverse_specifice_ligt = self.inverse_normalization(self.action_light)
         self.update_lights(actions_inverse_cmn_ligt['value'], actions_inverse_specifice_ligt['energy0'],
@@ -263,8 +259,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.update_noise_texture(action_inverse_noise['Scale'], action_inverse_noise['detail'],
                                   action_inverse_noise['noise_roughness'], action_inverse_noise['Distortion'])
 
-        self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_cmn_ligt,
-                                **actions_inverse_specifice_ligt, **actions_inverse_clr_ramp}
+        self.action_inverted = {**action_inverse_mat, **actions_inverse_cmn_ligt,
+                                **actions_inverse_specifice_ligt, **actions_inverse_clr_ramp, **action_inverse_noise}
 
         self.action_inverted = {key: round(value, 2) for key, value in self.action_inverted.items()}
 
@@ -291,9 +287,9 @@ class SpacerEnv(btb.env.BaseEnv):
         randomize = np.random.random_sample(3,)
         texture_node.inputs['Rotation'].default_value = randomize
 
-    def update_Mix(self, factor):
-        texture_node = self.texture_nodes['Mix']
-        texture_node.inputs['Factor'].default_value = factor
+    # def update_Mix(self, factor):
+    #     texture_node = self.texture_nodes['Mix']
+    #     texture_node.inputs['Factor'].default_value = factor
 
     def update_lights(self, value, energy0, Spread, ro_x, ro_y):
         #   set color
