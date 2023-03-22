@@ -79,7 +79,7 @@ def get_attribute_dict(*args):
     return attr_dict
 
 
-device_1 = get_device('1')
+device_1 = get_device('0')
 device_0 = device_1  # get_device('0')
 discriminator = resnet.resnet12(1, 2)
 
