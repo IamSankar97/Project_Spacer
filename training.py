@@ -218,7 +218,7 @@ class CustomDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data)
 
-
+# Resnet12 as discriminator and feature extractor with two noise.
 class Penv(gym.Env):
     def __init__(self, batch_size, episode_length):
         super(Penv, self).__init__()
