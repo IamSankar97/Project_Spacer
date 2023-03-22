@@ -81,7 +81,7 @@ def get_attribute_dict(*args):
 
 device_1 = get_device('1')
 device_0 = device_1  # get_device('0')
-discriminator = resnet.resnet10(1, 2)
+discriminator = resnet.resnet12(1, 2)
 
 print(discriminator)
 
@@ -172,7 +172,7 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space['0image'].shape[0]
-        self.cnn = torch.nn.Sequential(*list(resnet.resnet10(n_input_channels, 2).children())[:-1]).extend(
+        self.cnn = torch.nn.Sequential(*list(resnet.resnet12(n_input_channels, 2).children())[:-1]).extend(
             [torch.nn.Flatten()])
 
         # Compute shape by doing one forward pass
@@ -233,7 +233,6 @@ class Penv(gym.Env):
         self.action_space = spaces.Box(-1, 1, shape=(11,))
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.actual_dataloader = self.get_image_dataloader()
-        # self.initialize_discriminator(no_of_stps=500)
         # derived by calculating avg value over all the available fake images of shape 64*64
         self.brightness_threshold = np.array([0.85, 0.30])
         self.mean_brightness = torch.mean(to_device(torch.from_numpy(self.brightness_threshold), device=device_0))
@@ -245,8 +244,8 @@ class Penv(gym.Env):
         self.avg_brightness_mean = []
         self.time_step = -1
         self.episodes = 0
-        self.avg_brightness = 0
         self.epoch = 0
+        self.avg_brightness = 0
         self.disc_fake_score = 0
         self.disc_real_score = 0
         self.discriminator_loss = 0
@@ -254,6 +253,7 @@ class Penv(gym.Env):
         self.generator_loss_mean = []
         self.buffer_act_spacer = deque(maxlen=self.episode_length)
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
+        self.initialize_discriminator(no_of_stps=1000)
 
     def get_attributes(self, attr_names):
         return {attr_name: getattr(self, attr_name) for attr_name in dir(self) if
@@ -376,7 +376,7 @@ class Penv(gym.Env):
             log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
                                      'dict_fk_score': np.mean(dicc_fk_score)}, category='disc_perf', step=self.epoch)
 
-            if np.mean(disc_ls) < 0.005:
+            if np.mean(disc_ls) < 0.065:
                 print('stopping pretraining as disc_fk_score {} > 0.95 and discriminator_loss {}'.format(
                     np.mean(dicc_fk_score), np.mean(disc_ls)))
                 break
@@ -453,7 +453,7 @@ class Penv(gym.Env):
         self.generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
 
         #   Caculate Reward
-        self.reward = -self.crose_entropy - self.mse - (0.1 * self.kl)
+        self.reward = -self.crose_entropy  # - self.mse - (0.1 * self.kl)
 
         #   Collect Datas in lists
         self.buffer_act_spacer.append(actual_spacer)
@@ -469,7 +469,7 @@ class Penv(gym.Env):
             buffer_act_spacer = torch.stack(list(self.buffer_act_spacer))
             buffer_fake_spacer = torch.stack(list(self.buffer_fake_spacer))
 
-            while np.mean(disc_ls) < self.target_disc_loss:
+            while True:
 
                 #   Generate a random permutation of indices along the second dimension
                 indices0, indices1 = torch.randperm(buffer_act_spacer.size(1), device=device_1), \
@@ -503,7 +503,8 @@ class Penv(gym.Env):
                                                                                             self.target_disc_loss))
                         break
 
-                if is_loss_stagnated_or_increasing(disc_ls, window_size=self.episode_length, threshold=1e-3):
+                if is_loss_stagnated_or_increasing(disc_ls, window_size=self.episode_length, threshold=1e-4):
+                    print('stopping disc training as discriminator_loss has stagnated')
                     break
 
             self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(disc_ls), \
@@ -534,9 +535,9 @@ class Penv(gym.Env):
 
 
 def main():
-    batch_size = 2
+    batch_size = 6
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
-    episode_length = batch_size*34
+    episode_length = batch_size * 34
     print("batch_size:", batch_size, 'episode_length:', episode_length)
     py_env = Monitor(Penv(batch_size=batch_size, episode_length=episode_length))
     # obs = Py_env.reset()
@@ -556,7 +557,7 @@ def main():
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
     model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=0.001,
-                batch_size=batch_size, n_steps=episode_length, n_epochs=10, clip_range=.1, gamma=.95, gae_lambda=.9,
+                batch_size=batch_size, n_steps=episode_length, n_epochs=20, clip_range=.1, gamma=.95, gae_lambda=.9,
                 policy_kwargs=policy_kwargs,
                 seed=seed_, device=device_1)
 
