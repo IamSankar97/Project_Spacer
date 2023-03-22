@@ -230,7 +230,7 @@ class Penv(gym.Env):
         self.environments.reset()
         self.action_paired = {}
         # logging must be after environment generation
-        self.action_space = spaces.Box(-1, 1, shape=(11,))
+        self.action_space = spaces.Box(-1, 1, shape=(15,))
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.actual_dataloader = self.get_image_dataloader()
         # derived by calculating avg value over all the available fake images of shape 64*64
@@ -384,7 +384,6 @@ class Penv(gym.Env):
         torch.save(discriminator, os.path.join(CHECKPOINT_DIR, 'Resnet_disc_model_{}.pth'.format('pretrain')))
 
     def get_state(self, fake_spacer):
-
         obs_imgs = np.expand_dims(fake_spacer, axis=-1)
         obs_imgs = OrderedDict(zip(list(self.observation_space.spaces.keys())[:-1], obs_imgs))
         obs_imgs['scalar'] = self.avg_brightness
