@@ -225,7 +225,7 @@ class Penv(gym.Env):
         self.target_disc_loss = 1
         self.target_gen_loss = 1
         self.spacer_data_dir = '/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/'
-        self.environments = gym.make("blendtorch-spacer-v2", address=1, real_time=False)
+        self.environments = gym.make("blendtorch-spacer-v2", address=2, real_time=False)
         logging.basicConfig(filename=train_log, level=logging.INFO)
         self.environments.reset()
         self.action_paired = {}
@@ -536,7 +536,7 @@ class Penv(gym.Env):
 def main():
     batch_size = 6
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
-    episode_length = batch_size * 34
+    episode_length = batch_size #* 34
     print("batch_size:", batch_size, 'episode_length:', episode_length)
     py_env = Monitor(Penv(batch_size=batch_size, episode_length=episode_length))
     # obs = Py_env.reset()
