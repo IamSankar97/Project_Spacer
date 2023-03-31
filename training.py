@@ -368,9 +368,7 @@ class Penv(gym.Env):
 
             log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
                                      'dict_fk_score': np.mean(dicc_fk_score)}, category='disc_perf', step=self.epoch)
-            if np.mean(disc_ls) < self.target_disc_loss:
-                print('disc_ls_{} is less than the threshold{}'.format(np.mean(disc_ls), self.target_disc_loss))
-                break
+            self.epoch += 1
             if is_loss_stagnated_or_increasing(disc_ls, window_size=self.episode_length*2, threshold=1e-6):
                 print('stopping disc training as discriminator_loss has stagnated')
                 break
