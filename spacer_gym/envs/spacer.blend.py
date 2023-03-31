@@ -35,6 +35,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.spacer = bpy.data.objects["spacer_ring"]
         self.camera = bpy.data.objects["Camera"]
         self.light0 = bpy.data.objects["L0_top"]
+        self.episodes, self.step, self.total_step = -2, 0, 0
         # self.light1 = bpy.data.objects["L1_0"]
         # self.light1 = bpy.data.objects["L2_240"]
         self.img_addr = 'spacer_gym/spacer_env_render/image_spacer.png'
@@ -47,12 +48,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.vertices = None
         self.topology_dir = '/home/mohanty/PycharmProjects/Data/pkl_6/'
         self.g_time_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data/temp{}/full'.format(
-            self.g_time_stamp)
-        self.file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data/temp{}/croped'.format(
-            self.g_time_stamp)
-        os.makedirs(self.file_path_full, exist_ok=True)
-        os.makedirs(self.file_path_croped, exist_ok=True)
         self.topologies = os.listdir(self.topology_dir)
         #   (3)
         self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
@@ -77,7 +72,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light_cmn, **self.action_light,
                              **self.action_clr_ramp}
         self.action_keys = list(self.action_bound.keys())
-        self.episodes, self.step, self.total_step = -2, 0, 0
         self.update_scene()
         time.sleep(5)
 
@@ -166,11 +160,16 @@ class SpacerEnv(btb.env.BaseEnv):
         # global dummy_actions
         self.episodes += 1
         self.step = 0
-        # Define the standard deviation for the Gaussian noise
-        std_dev = 0.1
+
+        self.file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data/temp{}/full/{}'.format(
+            self.g_time_stamp, self.episodes)
+        self.file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data/temp{}/croped/{}'.format(
+            self.g_time_stamp, self.episodes)
+        os.makedirs(self.file_path_full, exist_ok=True)
+        os.makedirs(self.file_path_croped, exist_ok=True)
 
         # Generate random Gaussian noise
-        noise = np.random.normal(scale=std_dev, size=len(self.reset_action))
+        noise = np.random.normal(scale=0.1, size=len(self.reset_action))
 
         # Add noise to the action
         action = np.array(list(self.reset_action.values())) + noise
@@ -286,8 +285,8 @@ class SpacerEnv(btb.env.BaseEnv):
         texture_node.inputs['Rotation'].default_value = randomize
 
     def update_Mix(self, factor):
-        texture_node = self.texture_nodes['Mix']
-        texture_node.inputs['Factor'].default_value = factor
+        texture_node = self.texture_nodes['Mix (Legacy)']
+        texture_node.inputs['Fac'].default_value = factor
 
     def update_lights(self, value, energy0, Spread, ro_x, ro_y):
         #   set color
