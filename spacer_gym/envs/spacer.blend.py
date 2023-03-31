@@ -52,11 +52,12 @@ class SpacerEnv(btb.env.BaseEnv):
         #   (3)
         self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
         #   (1)
-        self.action_mix = {'Factor': [0.95, 0.99]}
+        self.action_mix = {'Factor': [0.0, 0.4]}
         #   (1)
         self.action_light_cmn = {"value": [0.8, 1]}
         #   (4)
-        self.action_light = {'energy0': [0.001, 0.015], 'Spread': [1.309, 1.8326], 'ro_x': [0, 0.296], 'ro_y': [0, 0.296]}
+        self.action_light = {'energy0': [0.001, 0.015], 'Spread': [1.309, 1.8326], 'ro_x': [0, 0.296],
+                             'ro_y': [0, 0.296]}
         #   (2)
         self.action_clr_ramp = {'Pos_black': [0, 0.3], 'Pos_white': [0.7, 1]}
         # Total = 11
@@ -66,7 +67,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.ortho_actions = pd.read_csv('/home/mohanty/PycharmProjects/Scribed '
                                          'spacer_1light/spacer_gym/envs/ortho1.csv', header=None)
 
-        self.reset_action = {'specular': 0.5, 'ior': 2.3, 'roughness': 0.2, 'factor': 0.96, "value": 0.8,
+        self.reset_action = {'specular': 0.5, 'ior': 2.3, 'roughness': 0.2, 'factor': 0.1, "value": 0.8,
                              'energy0': 0.005, 'Spread': 1.5708, 'ro_x': 0, 'ro_y': 0, 'Pos_black': 0.225,
                              'Pos_white': 0.9, 'ro_z': 0}
         self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light_cmn, **self.action_light,
@@ -263,6 +264,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.action_inverted = {key: round(value, 2) for key, value in self.action_inverted.items()}
 
         self.update_mapping()
+        self.update_spacer_orientation()
 
     def update_mat(self, specular, ior, roughness):
         mat = self.spacer.data.materials[0]
@@ -309,11 +311,11 @@ class SpacerEnv(btb.env.BaseEnv):
         color_ramp.elements[0].position = Pos_black
         color_ramp.elements[1].position = Pos_white
 
-    def update_spacer_orientation(self, ro_z):
+    def update_spacer_orientation(self):
         # self.spacer.location.x = np.random.uniform(-0.0003, 0.0003)
         # self.spacer.location.y = np.random.uniform(-0.0003, 0.0003)
         # self.spacer.location.z = np.random.uniform(-0.0003, 0.0003)
-        self.spacer.rotation_euler.z = ro_z
+        self.spacer.rotation_euler.z = np.random.uniform(0, 3.14)
 
 
 def main():
