@@ -540,7 +540,7 @@ class Penv(gym.Env):
 def main():
     batch_size = 6
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
-    episode_length = batch_size * 10
+    episode_length = batch_size * 20
     print("batch_size:", batch_size, 'episode_length:', episode_length)
     py_env = Monitor(Penv(batch_size=batch_size, episode_length=episode_length))
     # obs = Py_env.reset()
