@@ -24,7 +24,7 @@ sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 class SpacerEnv(btb.env.BaseEnv):
