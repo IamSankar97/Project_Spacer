@@ -147,14 +147,10 @@ class TrainAndLoggingCallback(BaseCallback):
             gen_model_path = os.path.join(self.save_path, 'PPO_gen_model_{}'.format(self.n_calls))
             self.model.save(gen_model_path)
 
-            self.logger.record('GAN_loss/ep_disc_loss', self.training_env.get_attr('discriminator_loss')[0])
             self.logger.record('GAN_loss/ep_gen_loss', np.mean(self.training_env.get_attr('generator_loss_mean')))
             self.logger.record('GAN_loss/generator_acc_mean', np.mean(self.training_env.get_attr('generator_acc_mean')))
-            self.logger.record('GAN_loss/ep_disc_rl_score', self.training_env.get_attr('disc_real_score')[0])
-            self.logger.record('GAN_loss/ep_disc_fk_score', self.training_env.get_attr('disc_fake_score')[0])
             self.logger.record('GAN_loss/avg_brightness_mean',
                                np.mean(self.training_env.get_attr('avg_brightness_mean')))
-            self.logger.record('rollout/avg_brightness', self.training_env.get_attr('avg_brightness')[0])
 
             return True
 
@@ -220,9 +216,11 @@ class CustomDataset(torch.utils.data.Dataset):
 class Penv(gym.Env):
     def __init__(self, batch_size, episode_length):
         super(Penv, self).__init__()
+        self.disc_ls_epoch = []
+        self.disc_ls = None
+        self.disc_rl_score = None
+        self.disc_fk_score = None
         self.done = False
-        self.target_disc_loss = 0.8
-        self.target_gen_loss = 0.8
         self.spacer_data_dir = '/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/'
         self.environments = gym.make("blendtorch-spacer-v2", address=1, real_time=False)
         logging.basicConfig(filename=train_log, level=logging.INFO)
@@ -254,7 +252,7 @@ class Penv(gym.Env):
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
         self.disc_buffer_act_spacer = []
         self.disc_buffer_fake_spacer = []
-        self.initialize_discriminator(no_of_stps=0)
+        self.initialize_discriminator()
 
     def get_attributes(self, attr_names):
         return {attr_name: getattr(self, attr_name) for attr_name in dir(self) if
@@ -333,47 +331,49 @@ class Penv(gym.Env):
         fake_spacer = np.random.permutation(fake_spacer)
         return fake_spacer
 
-    def initialize_discriminator(self, no_of_stps=10, device=device_0):
-        dicc_fk_score, disc_rl_score, disc_ls = [], [], []
-        ortho_actions = get_orth_actions(self.action_space.shape[0])
+    def initialize_discriminator(self, device=device_0):
 
-        orth_action = pd.DataFrame(ortho_actions)
-
+        ortho_actions = pd.DataFrame(get_orth_actions(self.action_space.shape[0]))
         noise_std, theta, dt = 0.12, 0.15, 1e-2
 
+        self.disc_ls_epoch = []
         while True:
-            #   Take action and collect observations
-            noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(self.action_space.shape),
-                                                 sigma=np.array(noise_std), theta=theta, dt=dt)
-            action = np.array(orth_action.sample())
-            noisy_action = np.squeeze(np.clip(action + noise(), self.action_space.low, self.action_space.high))
+            self.disc_fk_score, self.disc_rl_score, self.disc_ls = [], [], []
+            for _ in range(self.episode_length):  # episode_length = completing 1 epoch
+                #   Take action and collect observations
+                noise = OrnsteinUhlenbeckActionNoise(mean=np.zeros(self.action_space.shape),
+                                                     sigma=np.array(noise_std), theta=theta, dt=dt)
+                action = np.array(ortho_actions.sample())
+                noisy_action = np.squeeze(np.clip(action + noise(), self.action_space.low, self.action_space.high))
 
-            actual_spacer, fake_spacer, info = self.get_data(noisy_action)
-            fake_spacer = self.match_obs_space(fake_spacer)
+                actual_spacer, fake_spacer, info = self.get_data(noisy_action)
+                fake_spacer = self.match_obs_space(fake_spacer)
 
-            actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255
+                actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255
 
-            actual_spacer = to_device(actual_spacer, device)
-            fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), device)
+                actual_spacer = to_device(actual_spacer, device)
+                fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), device)
 
-            self.discriminator_loss, self.disc_real_score, self.disc_fake_score = train_discriminator(actual_spacer,
-                                                                                                      fake_spacer,
-                                                                                                      opt_d)
-            dicc_fk_score.append(self.disc_fake_score)
-            disc_ls.append(self.discriminator_loss)
-            disc_rl_score.append(self.disc_real_score)
+                discriminator_loss, disc_real_score, disc_fake_score = train_discriminator(actual_spacer, fake_spacer,
+                                                                                           opt_d)
+                self.disc_fk_score.append(disc_fake_score)
+                self.disc_ls.append(discriminator_loss)
+                self.disc_rl_score.append(disc_real_score)
 
-            print('pre_train_step:', self.epoch, 'disc_ls:', np.mean(disc_ls), 'disc_rl_score:',
-                  np.mean(disc_rl_score), 'disc_fk_score:', np.mean(dicc_fk_score), end='\n\n')
+            print('Epoch:', self.epoch, 'disc_ls:', np.mean(self.disc_ls), 'disc_rl_score:',
+                  np.mean(self.disc_rl_score), 'disc_fk_score:', np.mean(self.disc_fk_score), end='\n\n')
 
-            log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
-                                     'dict_fk_score': np.mean(dicc_fk_score)}, category='disc_perf', step=self.epoch)
+            log_dict_to_tensorboard({'disc_ls': np.mean(self.disc_ls), 'disc_rl_score': np.mean(self.disc_rl_score),
+                                     'dict_fk_score': np.mean(self.disc_fk_score)}, category='disc_perf',
+                                    step=self.epoch)
+
             self.epoch += 1
-            if is_loss_stagnated_or_increasing(disc_ls, window_size=self.episode_length*2, threshold=1e-6):
+            self.disc_ls_epoch.append(np.mean(self.disc_ls))
+            if is_loss_stagnated_or_increasing(self.disc_ls_epoch, window_size=self.episode_length, threshold=1e-3):
                 print('stopping disc training as discriminator_loss has stagnated')
                 break
 
-        torch.save(discriminator, os.path.join(CHECKPOINT_DIR, 'Resnet_disc_model_{}.pth'.format('pretrain')))
+        torch.save(discriminator, os.path.join(CHECKPOINT_DIR, 'Resnet_disc_model_{}_{}.pth'.format('pretrain', self.epoch)))
 
     def get_state(self, fake_spacer):
 
@@ -394,7 +394,6 @@ class Penv(gym.Env):
         return self.state
 
     def step(self, action, device=device_0):
-        global disc_ls, disc_fk_sc, disc_rl_sc, discriminator_loss
 
         #   Update and reset attributes
         self.steps += 1
@@ -456,70 +455,76 @@ class Penv(gym.Env):
         self.done = self.chk_termination()
 
         if self.done:
-            if 1 >= np.mean(self.generator_loss_mean):
-                self.disc_buffer_act_spacer.extend(self.buffer_act_spacer)
-                self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
+
+            if self.episodes == 1:
+                self.target_gen_loss = np.round(np.array(np.mean(self.generator_loss_mean)), 2)
+                self.target_disc_loss = self.target_gen_loss
+
+            print('gen_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen&disc_loss', self.target_gen_loss,
+                  'gen_loss_mean:', np.mean(self.generator_loss_mean), end='\n\n')
+
+            self.disc_buffer_act_spacer.extend(self.buffer_act_spacer)
+            self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
 
             #   Discriminator Training
             if np.mean(self.generator_loss_mean) < self.target_gen_loss:
-                disc_ls, disc_rl_score, disc_fk_score = [], [], []
 
                 buffer_act_spacer = torch.stack(list(self.disc_buffer_act_spacer))
                 buffer_fake_spacer = torch.stack(list(self.disc_buffer_fake_spacer))
 
                 while True:
-
                     #   Generate a random permutation of indices along the second dimension
-                    indices0, indices1 = torch.randperm(buffer_act_spacer.size(1), device=device_1), \
-                        torch.randperm(buffer_fake_spacer.size(1), device=device_1)
-
+                    # same indices for both actual and real spacer
+                    indices = torch.randperm(buffer_act_spacer.size(1), device=device_1)
                     #   Use the index_select function to shuffle the tensor along the second dimension
-                    buffer_act_spacer, buffer_fake_spacer = torch.index_select(buffer_act_spacer, 1, indices0), \
-                        torch.index_select(buffer_fake_spacer, 1, indices1)
+                    buffer_act_spacer, buffer_fake_spacer = torch.index_select(buffer_act_spacer, 1, indices), \
+                        torch.index_select(buffer_fake_spacer, 1, indices)
+                    self.disc_fk_score, self.disc_rl_score, self.disc_ls = [], [], []
 
+                    count = 0
                     for actual_spacer_n, fake_spacer_n in zip(buffer_act_spacer, buffer_fake_spacer):
                         discriminator_loss, disc_real_score, disc_fake_score = \
                             train_discriminator(actual_spacer_n, fake_spacer_n, opt_d, clip=True)
 
-                        self.epoch += 1
-                        disc_ls.append(discriminator_loss)
-                        disc_rl_score.append(disc_real_score)
-                        disc_fk_score.append(disc_fake_score)
+                        self.disc_ls.append(discriminator_loss)
+                        self.disc_rl_score.append(disc_real_score)
+                        self.disc_fk_score.append(disc_fake_score)
 
-                        print('episode:', self.episodes, 'epoch', self.epoch, 'discrim_loss:', np.mean(disc_ls),
-                              'disc_rl_score:', np.mean(disc_rl_score), 'disc_fk_score:', np.mean(disc_fk_score),
-                              end='\n\n')
-
-                        self.disc_fake_score = np.mean(disc_fk_score)
-
-                        log_dict_to_tensorboard(
-                            {'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
-                             'dict_fk_score': np.mean(disc_fk_score)}, category='disc_perf',
-                            step=self.epoch)
-
-                        if np.mean(disc_ls) < self.target_disc_loss:
-                            print('stopping disc training as disc_loss{} < {}'.format(np.mean(disc_ls),
-                                                                                      self.target_disc_loss))
+                        count += 1
+                        if count == self.episode_length:
+                            self.epoch += 1
                             break
 
-                    if is_loss_stagnated_or_increasing(disc_ls, window_size=self.episode_length*2, threshold=1e-6):
+                    print('Epoch:', self.epoch, 'disc_ls:', np.mean(self.disc_ls), 'disc_rl_score:',
+                          np.mean(self.disc_rl_score), 'disc_fk_score:', np.mean(self.disc_fk_score), end='\n\n')
+
+                    log_dict_to_tensorboard(
+                        {'disc_ls': np.mean(self.disc_ls), 'disc_rl_score': np.mean(self.disc_rl_score),
+                         'dict_fk_score': np.mean(self.disc_fk_score)}, category='disc_perf',
+                        step=self.epoch)
+
+                    self.disc_fake_score = np.mean(self.disc_fk_score)
+
+                    if np.mean(self.disc_ls) < self.target_disc_loss:
+                        print('stopping disc training as disc_loss{} < {}'.format(np.mean(self.disc_ls),
+                                                                                  self.target_disc_loss))
+                        break
+                    self.disc_ls_epoch.append(np.mean(self.disc_ls))
+                    if is_loss_stagnated_or_increasing(self.disc_ls_epoch, window_size=self.episode_length,
+                                                       threshold=1e-6):
                         print('stopping disc training as discriminator_loss has stagnated')
                         break
 
-                self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(disc_ls), \
-                    np.mean(disc_rl_score), np.mean(disc_fk_score)
+                self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(self.disc_ls), \
+                    np.mean(self.disc_rl_score), np.mean(self.disc_fk_score)
 
                 torch.save(discriminator, os.path.join(CHECKPOINT_DIR,
                                                        'Resnet_disc_model_{}_ep{}.pth'.format(self.time_step,
                                                                                               self.epoch)))
-
                 self.target_gen_loss -= 0.25
                 self.target_disc_loss -= 0.25
                 self.disc_buffer_act_spacer = []
                 self.disc_buffer_fake_spacer = []
-
-            print('generator_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen_loss', self.target_gen_loss,
-                  'generator_loss_mean:', np.mean(self.generator_loss_mean), end='\n')
 
         #   Logging
         log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'crose_entropy', 'disc_real_score',
@@ -538,7 +543,7 @@ class Penv(gym.Env):
 
 
 def main():
-    batch_size = 6
+    batch_size = 4
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
     episode_length = batch_size * 20
     print("batch_size:", batch_size, 'episode_length:', episode_length)
