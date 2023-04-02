@@ -246,8 +246,8 @@ def is_loss_stagnated_or_increasing(loss_list, window_size=100, threshold=1e-4):
         return False
     last_losses = loss_list[-window_size:]
     std_dev = np.std(last_losses)
-    min_loss = min(last_losses)
-    if std_dev < threshold or loss_list[-1] >= min_loss:
+    # min_loss = min(last_losses)
+    if std_dev < threshold: #or loss_list[-1] >= min_loss
         return True
     else:
         return False
