@@ -510,7 +510,7 @@ class Penv(gym.Env):
                                                                                   self.target_disc_loss))
                         break
                     self.disc_ls_epoch.append(np.mean(self.disc_ls))
-                    if is_loss_stagnated_or_increasing(self.disc_ls_epoch, window_size=self.episode_length,
+                    if is_loss_stagnated_or_increasing(self.disc_ls_epoch, window_size=self.episode_length*2,
                                                        threshold=1e-6):
                         print('stopping disc training as discriminator_loss has stagnated')
                         break
