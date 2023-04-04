@@ -4,6 +4,10 @@
 
 import sys
 import os
+sys.path.append(os.getcwd())
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
+
 import bpy
 import time
 import bmesh
@@ -19,10 +23,6 @@ from spacer import Spacer
 import datetime
 from img_processing import remove_back_ground
 from utils import augument, get_circular_corps, get_no_defect_crops
-
-sys.path.append(os.getcwd())
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -84,24 +84,17 @@ class SpacerEnv(btb.env.BaseEnv):
             if vertice_old.co.z != 1:
                 vertice_old.co.z = vertice_new[2]
 
-    def update_mesh_back_ground(self, new_realisation: np.ndarray):
+    def update_mesh_back_ground(self):
         """
-
-        :param new_realisation: a numpy array with new mesh deta
-        :param existing_mesh: existing mesh where the new_realisation data to be updated
         :return: updates mesh in blender
         """
-        # Get a BMesh representation
-        bm = bmesh.new()  # create an empty BMesh
-        bm.from_mesh(self.spacer.data)  # fill it in from a Mesh
-        self.vertices = list(new_realisation)
-        for vertice_old, vertice_new in zip(bm.verts, self.vertices):
-            if vertice_old.co.z != 1:
-                vertice_old.co.z = vertice_new[2]
+        z_coordinates = np.array(self.vertices).flatten()
 
-        bm.to_mesh(self.spacer.data)  # Finish up, write the bmesh back to the mesh
-        bm.free()
-        self.update_scene()  # Updates the mesh in scene by refreshing the screen
+        # Update the z-coordinates directly in the mesh data
+        self.spacer.data.vertices.foreach_set("co", z_coordinates)
+
+        # Update the mesh in Blender
+        self.spacer.data.update() # Updates the mesh in scene by refreshing the screen
 
     def get_sample_surface(self, with_defect=True):
         filename = random.choice(self.topologies)
@@ -153,7 +146,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.total_step += 1
 
         self.take_action(actions)
-        self.update_scene()
         # spacer = self.get_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
 
@@ -188,29 +180,11 @@ class SpacerEnv(btb.env.BaseEnv):
 
         # spacer = self.reset_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
-        self.update_scene()
         self.total_step += 1
         return self._env_post_step()
 
-    # def _env_post_step(self):
-    #
-    #     # Setup default image rendering
-    #     global r_
-    #     cam = btb.Camera()
-    #     off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-    #     file_path = 'spacer_gym/temp{}/image{}_{}.png'.format(self.g_time_stamp, self.episodes, self.step)
-    #
-    #     pil_img = off.render(file_path)
-    #     gray_img = np.array(pil_img, dtype=np.uint8)
-    #     blur_img = cv2.GaussianBlur(gray_img, (3, 3), 0)
-    #     ret, binary_img = cv2.threshold(blur_img, 30, 255, cv2.THRESH_BINARY)
-    #     RM_BG_img = cv2.bitwise_and(gray_img, gray_img, mask=binary_img)
-    #     self.state = Image.fromarray(RM_BG_img)
-    #     done, r_ = False, 1
-    #
-    #     return dict(obs=self.state, reward=r_, done=done)
-
     def _env_post_step(self):
+        self.update_scene()
 
         # Setup default image rendering
         global r_
