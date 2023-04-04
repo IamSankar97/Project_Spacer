@@ -41,10 +41,10 @@ np.random.seed(seed_)
 stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 log_path = '/home/mohanty/PycharmProjects/'
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-CHECKPOINT_DIR = log_path + 'train_logs/spacer{}/PPO_model/'.format(stamp)
-LOG_DIR = log_path + 'train_logs/spacer{}/PPO_log'.format(stamp)
-FINAL_MODEL_DIR = log_path + 'train_logs/spacer{}/PPO_final_model'.format(stamp)
-FINAL_R_BUFFER_DIR = log_path + 'train_logs/spacer{}/PPO_BUFFER_model'.format(stamp)
+CHECKPOINT_DIR = log_path + 'train_logs2/spacer{}/PPO_model/'.format(stamp)
+LOG_DIR = log_path + 'train_logs2/spacer{}/PPO_log'.format(stamp)
+FINAL_MODEL_DIR = log_path + 'train_logs2/spacer{}/PPO_final_model'.format(stamp)
+FINAL_R_BUFFER_DIR = log_path + 'train_logs2/spacer{}/PPO_BUFFER_model'.format(stamp)
 ACTION_LOG_DIR = LOG_DIR + '/action_log'
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -457,8 +457,8 @@ class Penv(gym.Env):
         self.done = self.chk_termination()
 
         if self.done and self.episodes == 1:
-            self.target_gen_loss = 1
-            self.target_disc_loss = 1
+            self.target_gen_loss = 2
+            self.target_disc_loss = 2
 
         if self.done:
             print('\033[1mgen_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen&disc_loss',
