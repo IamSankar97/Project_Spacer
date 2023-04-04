@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import math
-import matplotlib.pyplot as plt
+from skimage.util import view_as_windows
 from PIL import Image, ImageFilter
 import itertools
 import random
@@ -177,18 +177,17 @@ def get_slid_window(image, win_size=(64, 64), step_size=32):
 
 
 def get_no_defect_crops(image, win_size=(64, 64), step_size=32, thresh_old=1, count=30):
-    # Initialize empty list to store resultant windows
-    result_windows = []
+    # Generate windows using view_as_windows
+    windows = view_as_windows(image, win_size, step=step_size)
+    # Flatten windows and count number of pixels below threshold
+    counts = np.sum(windows <= thresh_old, axis=(2, 3))
+    # Find indices where number of pixels below threshold is less than count
+    y, x = np.where(counts < count)
+    # Extract windows with desired indices
+    result_windows = windows[y, x]
+    # Reshape windows to 2D and return
+    return result_windows.reshape(len(result_windows), *win_size)
 
-    # Iterate over image with sliding window
-    for y in range(0, image.shape[0], step_size):
-        for x in range(0, image.shape[1], step_size):
-            # Crop out window
-            window = image[y:y + win_size[1], x:x + win_size[0]]
-            # 30  is no of pixels meeting threshold
-            if np.sum(window <= thresh_old) < count:
-                result_windows.append(window)
-    return np.array(result_windows)
 
 
 def get_orth_actions(no_of_actions, action_range=(-1, 1)):
