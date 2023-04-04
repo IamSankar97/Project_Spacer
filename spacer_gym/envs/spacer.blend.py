@@ -154,9 +154,9 @@ class SpacerEnv(btb.env.BaseEnv):
         self.episodes += 1
         self.step = 0
 
-        self.file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data/temp{}/full/{}'.format(
+        self.file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/full/{}'.format(
             self.g_time_stamp, self.episodes)
-        self.file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data/temp{}/croped/{}'.format(
+        self.file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/croped/{}'.format(
             self.g_time_stamp, self.episodes)
         os.makedirs(self.file_path_full, exist_ok=True)
         os.makedirs(self.file_path_croped, exist_ok=True)
@@ -204,12 +204,9 @@ class SpacerEnv(btb.env.BaseEnv):
 
         # self.state = get_circular_corps(obs, step_angle=20, radius=850, address=self.file_path_croped + '/{}_{}_'.format(self.episodes, self.step))
         self.state = get_no_defect_crops(obs, win_size=(64, 64), step_size=64)
+        self.state = Image.fromarray(np.hstack(self.state))
 
-        if self.state is None or (isinstance(self.state, np.ndarray) and self.state.size == 0):
-            arr = np.zeros((150, 64, 64), dtype=np.uint8)
-            self.state = Image.fromarray(np.hstack(arr))
-        else:
-            self.state = Image.fromarray(np.hstack(self.state))
+        if self.episodes % 60 == 0:
             self.state.save(self.file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
 
