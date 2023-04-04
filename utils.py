@@ -234,7 +234,7 @@ def center_ring(actual_spacer):
     return centered_ring
 
 
-def is_loss_stagnated_or_increasing(loss_list, window_size=100, threshold=1e-4):
+def is_loss_stagnated(loss_list, window_size=100, threshold=1e-4):
     """
     Check if the loss is stagnant or increasing by taking the last `window_size` entries of the `loss_list`.
     Returns True if the standard deviation of the last `window_size` entries is below `threshold`,
