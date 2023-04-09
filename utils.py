@@ -239,13 +239,16 @@ def is_loss_stagnated(loss_list, window_size=100, threshold=1e-4):
     indicating that the loss is stagnant, or if the current loss value is greater than or equal to the minimum
     loss value observed over the last `window_size` iterations, indicating that the loss is increasing.
     """
-
-    if len(loss_list) < window_size:
+    if len(loss_list) < window_size*2:
         return False
     last_losses = loss_list[-window_size:]
+    last_to_last_losses = loss_list[-2*window_size:-window_size]
     std_dev = np.std(last_losses)
-    # min_loss = min(last_losses)
-    if std_dev < threshold:  # or loss_list[-1] >= min_loss
+    min_last_loss = min(last_losses)
+    min_last_last_loss = min(last_to_last_losses)
+    if std_dev < threshold or min_last_last_loss >= min_last_loss:
+        print('std_dev:', std_dev, 'threshold:', threshold,
+              'min_last_last_loss:', min_last_last_loss, 'min_last_loss:', min_last_loss)
         return True
     else:
         return False
