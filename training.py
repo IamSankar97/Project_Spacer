@@ -131,7 +131,7 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space['0image'].shape[0]
-        self.cnn = torch.nn.Sequential(*list(resnet.resnet10(n_input_channels, 2).children())[:-1]).extend(
+        self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-1]).extend(
             [torch.nn.Flatten()])
 
         # Compute shape by doing one forward pass
@@ -176,12 +176,12 @@ class CustomDataset(torch.utils.data.Dataset):
         return len(self.data)
 
 
-# Resnet12 as discriminator and feature extractor with two noise.
 class Penv(gym.Env):
-    def __init__(self, batch_size, episode_length, dat_dir, discriminator, lr_discriminator, device_discriminator,
-                 blender_add, blend_file):
+    def __init__(self, img_size, batch_size, episode_length, dat_dir, discriminator, lr_discriminator, weight_decay,
+                 device_discriminator, blender_add, blend_file):
         super(Penv, self).__init__()
         self.target_disc_loss = 0.001
+        self.img_size = img_size
         self.disc_ls_epoch = []
         self.disc_ls = None
         self.disc_rl_score = None
@@ -190,7 +190,8 @@ class Penv(gym.Env):
         self.spacer_data_dir = dat_dir
         self.discriminator = discriminator
         self.disc_device = device_discriminator
-        self.dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr_discriminator, betas=(0.5, 0.999))
+        self.dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr_discriminator, betas=(0.5, 0.999),
+                                              weight_decay=weight_decay)
         self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, blend_file=blend_file,
                                      real_time=False)
         logging.basicConfig(filename=train_log, level=logging.INFO)
@@ -267,7 +268,8 @@ class Penv(gym.Env):
             obs, _, _, info = self.environments.step(action)
             self.action_paired = info['action_pair']
             info.pop('action_pair')
-        fake_spacer = np.array([np.array(obs.crop((i, 0, i + 64, 64))) for i in range(0, obs.size[0], 64)])
+        fake_spacer = np.array([np.array(obs.crop((i, 0, i + self.img_size[0], self.img_size[0])))
+                                for i in range(0, obs.size[0], self.img_size[0])])
 
         return fake_spacer, info
 
@@ -276,7 +278,8 @@ class Penv(gym.Env):
         self.no_img_obs = len(fake_spacer)
         obs_space = {}
         for i in range(self.no_img_obs):
-            obs_space.update({'{}image'.format(i): spaces.Box(low=0, high=255, shape=(64, 64, 1), dtype=np.uint8)})
+            obs_space.update({'{}image'.format(i): spaces.Box(low=0, high=255,
+                                                              shape=self.img_size+(1,), dtype=np.uint8)})
         obs_space.update({'scalar': spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float64)})
 
         return obs_space
@@ -376,7 +379,7 @@ class Penv(gym.Env):
                     np.mean(self.disc_ls) < self.target_disc_loss:
                 print('stopping disc training as discriminator_loss has stagnated or target ls reached')
                 break
-            break
+
         torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR,
                                                     'Resnet_disc_model_{}_{}.pth'.format('pretrain', self.epoch)))
 
@@ -555,13 +558,15 @@ def parse_arguments():
     parser.add_argument('--data_dir', type=str,
                         default='/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/',
                         help='Cropped spacer images for discriminator training')
+    parser.add_argument('--img_size', nargs='*', type=int, default=[64, 64], help='img_size of discriminator training')
     parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
                                                                           'batches_in_episode')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
+    parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
     parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
 
-    parser.add_argument('--lr_generator', type=float, default=0.001, help='Learning rate for generator PPO')
+    parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=0, help='Generator device')
     parser.add_argument('--blender_add', type=int, default=10, help='Generator device')
@@ -570,22 +575,22 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def main(data_dir,
-         batch_size, batches_in_episode, lr_discriminator, device_discriminator, lr_generator,
-         total_steps, device_generator, blender_add, blend_file):
+def main(data_dir, img_size, batch_size, batches_in_episode, lr_discriminator, weight_decay, device_discriminator,
+         lr_generator, total_steps, device_generator, blender_add, blend_file):
     batch_size = batch_size
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
     episode_length = batch_size * batches_in_episode
 
     device_0 = get_device('{}'.format(device_discriminator))
     device_1 = get_device('{}'.format(device_generator))
-    discriminator = resnet.resnet10(1, 2)
+    discriminator = resnet.resnet18(1, 2)
     discriminator = to_device(discriminator, device_0)
     writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=5)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
-    py_env = Monitor(Penv(batch_size=batch_size, episode_length=episode_length, dat_dir=data_dir,
-                          discriminator=discriminator, lr_discriminator=lr_discriminator, device_discriminator=device_0,
-                          blender_add=blender_add, blend_file=blend_file))
+
+    py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length, dat_dir=data_dir,
+                          discriminator=discriminator, lr_discriminator=lr_discriminator, weight_decay=weight_decay,
+                          device_discriminator=device_0, blender_add=blender_add, blend_file=blend_file))
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
@@ -622,5 +627,6 @@ if __name__ == '__main__':
     args_dict = vars(args)
     writer.add_text("hyper_parameters", "Arguments0: " + str(args_dict), global_step=4)
 
-    main(args.data_dir, args.batch_size, args.batches_in_episode, args.lr_discriminator, args.device_discriminator,
-         args.lr_generator, args.total_steps, args.device_generator, args.blender_add, args.blend_file)
+    main(args.data_dir, tuple(args.img_size), args.batch_size, args.batches_in_episode, args.lr_discriminator,
+         args.weight_decay, args.device_discriminator, args.lr_generator, args.total_steps, args.device_generator,
+         args.blender_add, args.blend_file)
