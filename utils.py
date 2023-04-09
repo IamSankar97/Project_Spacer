@@ -189,7 +189,6 @@ def get_no_defect_crops(image, win_size=(64, 64), step_size=32, thresh_old=1, co
     return result_windows.reshape(len(result_windows), *win_size)
 
 
-
 def get_orth_actions(no_of_actions, action_range=(-1, 1)):
     var_ranges = [action_range] * no_of_actions
 
@@ -246,7 +245,48 @@ def is_loss_stagnated(loss_list, window_size=100, threshold=1e-4):
     last_losses = loss_list[-window_size:]
     std_dev = np.std(last_losses)
     # min_loss = min(last_losses)
-    if std_dev < threshold: #or loss_list[-1] >= min_loss
+    if std_dev < threshold:  # or loss_list[-1] >= min_loss
         return True
     else:
         return False
+
+
+def slid_window(image, mask_img, win_size=(64, 64), step_size=32, thresh_old=255, percentage_defect=0.02):
+    '''
+    Note: This code compares the image with mask image and returns defect, defect mask, good and good_mask
+    Parameters
+    ----------
+    percentage_defect : If Percentage of pixels greater than this the crop image to be considered defect
+    image: Defect free image
+    mask_img: Mask image
+    win_size: Crop size
+    step_size: self-explanatory
+    thresh_old: Pixel value in the mask image contributing to the defect (White pixels)
+
+    Returns
+    -------
+    This code compares the image with mask image and returns defect, defect mask, good and good_mask
+    '''
+    defect = []
+    defect_mask = []
+
+    good = []
+    good_mask = []
+    count = (win_size[0] ** 2) * percentage_defect
+    # Iterate over image with sliding window
+    for y in range(0, image.shape[0], step_size):
+        for x in range(0, image.shape[1], step_size):
+            # Crop out window
+            window = image[y:y + win_size[1], x:x + win_size[0]]
+            window_mask = mask_img[y:y + win_size[1], x:x + win_size[0]]
+            # 30  is no of pixels meeting threshold
+            if np.sum(window <= 1) < 25:
+                if np.sum(window_mask == thresh_old) > count:
+                    defect.append(window)
+                    defect_mask.append(window_mask)
+
+                else:
+                    good.append(window)
+                    good_mask.append(window_mask)
+
+    return defect, defect_mask, good, good_mask
