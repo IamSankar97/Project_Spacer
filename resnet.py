@@ -72,10 +72,11 @@ class BottleNeck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, num_block, no_in_channels=3, no_classes=100):
+    def __init__(self, block, num_block, no_in_channels=3, no_classes=100, model_name='resnet'):
         super().__init__()
 
         self.in_channels = 64
+        self.model_name = model_name
 
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels=no_in_channels, out_channels=64, kernel_size=3, padding=1, bias=False),
@@ -129,52 +130,52 @@ class ResNet(nn.Module):
         return output
 
 
-def resnet10(in_channels, num_classs):
+def resnet10(in_channels, num_classes):
+    """ return a ResNet 10 object
+    """
+    return ResNet(BasicBlock, [1, 1, 1, 1], no_in_channels=in_channels, no_classes=num_classes, model_name='resnet10')
+
+
+def resnet12(in_channels, num_classes):
+    """ return a ResNet 12 object
+    """
+    return ResNet(BasicBlock, [2, 1, 1, 1], no_in_channels=in_channels, no_classes=num_classes, model_name='resnet12')
+
+
+def resnet14(in_channels, num_classes):
+    """ return a ResNet 14 object
+    """
+    return ResNet(BasicBlock, [2, 2, 1, 1], no_in_channels=in_channels, no_classes=num_classes, model_name='resnet14')
+
+
+def resnet18(in_channels, num_classes):
     """ return a ResNet 18 object
     """
-    return ResNet(BasicBlock, [1, 1, 1, 1], no_in_channels=in_channels, no_classes=num_classs)
+    return ResNet(BasicBlock, [2, 2, 2, 2], no_in_channels=in_channels, no_classes=num_classes,  model_name='resnet18')
 
 
-def resnet12(in_channels, num_classs):
-    """ return a ResNet 18 object
-    """
-    return ResNet(BasicBlock, [2, 1, 1, 1], no_in_channels=in_channels, no_classes=num_classs)
-
-
-def resnet14(in_channels, num_classs):
-    """ return a ResNet 18 object
-    """
-    return ResNet(BasicBlock, [2, 2, 1, 1], no_in_channels=in_channels, no_classes=num_classs)
-
-
-def resnet18(in_channels, num_classs):
-    """ return a ResNet 18 object
-    """
-    return ResNet(BasicBlock, [2, 2, 2, 2], no_in_channels=in_channels, no_classes=num_classs)
-
-
-def resnet34():
+def resnet34(in_channels, num_classes):
     """ return a ResNet 34 object
     """
-    return ResNet(BasicBlock, [3, 4, 6, 3])
+    return ResNet(BasicBlock, [3, 4, 6, 3], no_in_channels=in_channels, no_classes=num_classes,  model_name='resnet34')
 
 
-def resnet50():
+def resnet50(in_channels, num_classes):
     """ return a ResNet 50 object
     """
-    return ResNet(BottleNeck, [3, 4, 6, 3])
+    return ResNet(BottleNeck, [3, 4, 6, 3], no_in_channels=in_channels, no_classes=num_classes,  model_name='resnet50')
 
 
-def resnet101():
+def resnet101(in_channels, num_classes):
     """ return a ResNet 101 object
     """
-    return ResNet(BottleNeck, [3, 4, 23, 3])
+    return ResNet(BottleNeck, [3, 4, 23, 3], no_in_channels=in_channels, no_classes=num_classes,  model_name='resnet101')
 
 
-def resnet152():
+def resnet152(in_channels, num_classes):
     """ return a ResNet 152 object
     """
-    return ResNet(BottleNeck, [3, 8, 36, 3])
+    return ResNet(BottleNeck, [3, 8, 36, 3], no_in_channels=in_channels, no_classes=num_classes,  model_name='resnet101')
 
     # if blocks == 10:
     #     layers = [1, 1, 1, 1]
