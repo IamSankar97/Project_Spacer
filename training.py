@@ -45,15 +45,18 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 CHECKPOINT_DIR = log_path + 'train_logs2/spacer{}/PPO_model/'.format(stamp)
 LOG_DIR = log_path + 'train_logs2/spacer{}/PPO_log'.format(stamp)
 FINAL_MODEL_DIR = log_path + 'train_logs2/spacer{}/PPO_final_model'.format(stamp)
-FINAL_R_BUFFER_DIR = log_path + 'train_logs2/spacer{}/PPO_BUFFER_model'.format(stamp)
 ACTION_LOG_DIR = LOG_DIR + '/action_log'
 
-os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(ACTION_LOG_DIR, exist_ok=True)
 train_log = LOG_DIR + 'training_log.csv'
 writer = SummaryWriter(ACTION_LOG_DIR)
+
+writer.add_text("log_address", "CHECKPOINT_DIR: " + CHECKPOINT_DIR, global_step=0)
+writer.add_text("log_address", "LOG_DIR: " + LOG_DIR, global_step=1)
+writer.add_text("log_address", "ACTION_LOG_DIR: " + ACTION_LOG_DIR, global_step=2)
+writer.add_text("log_address", "train_log: " + train_log, global_step=3)
 
 
 def log_dict_to_tensorboard(data_dict, category, step):
@@ -176,7 +179,7 @@ class CustomDataset(torch.utils.data.Dataset):
 # Resnet12 as discriminator and feature extractor with two noise.
 class Penv(gym.Env):
     def __init__(self, batch_size, episode_length, dat_dir, discriminator, lr_discriminator, device_discriminator,
-                 blender_add):
+                 blender_add, blend_file):
         super(Penv, self).__init__()
         self.target_disc_loss = 0.001
         self.disc_ls_epoch = []
@@ -188,7 +191,8 @@ class Penv(gym.Env):
         self.discriminator = discriminator
         self.disc_device = device_discriminator
         self.dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr_discriminator, betas=(0.5, 0.999))
-        self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, real_time=False)
+        self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, blend_file=blend_file,
+                                     real_time=False)
         logging.basicConfig(filename=train_log, level=logging.INFO)
         self.environments.reset()
         self.action_paired = {}
@@ -468,7 +472,7 @@ class Penv(gym.Env):
             self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
 
             #   Discriminator Training
-        if (self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss)\
+        if (self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss) \
                 or is_loss_stagnated(self.generator_loss):
             if not self.disc_buffer_act_spacer:
                 self.disc_buffer_act_spacer.extend(self.buffer_act_spacer)
@@ -553,7 +557,7 @@ def parse_arguments():
                         help='Cropped spacer images for discriminator training')
     parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
-                                                                           'batches_in_episode')
+                                                                          'batches_in_episode')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
 
@@ -561,12 +565,14 @@ def parse_arguments():
     parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=0, help='Generator device')
     parser.add_argument('--blender_add', type=int, default=10, help='Generator device')
+    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_new_materail2.blend',
+                        help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
 
 
 def main(data_dir,
          batch_size, batches_in_episode, lr_discriminator, device_discriminator, lr_generator,
-         total_steps, device_generator, blender_add):
+         total_steps, device_generator, blender_add, blend_file):
     batch_size = batch_size
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
     episode_length = batch_size * batches_in_episode
@@ -575,11 +581,11 @@ def main(data_dir,
     device_1 = get_device('{}'.format(device_generator))
     discriminator = resnet.resnet10(1, 2)
     discriminator = to_device(discriminator, device_0)
-
+    writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=5)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
     py_env = Monitor(Penv(batch_size=batch_size, episode_length=episode_length, dat_dir=data_dir,
                           discriminator=discriminator, lr_discriminator=lr_discriminator, device_discriminator=device_0,
-                          blender_add=blender_add))
+                          blender_add=blender_add, blend_file=blend_file))
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
@@ -608,9 +614,13 @@ def main(data_dir,
                 reset_num_timesteps=False)
     model.save(FINAL_MODEL_DIR + '{}'.format(total_steps))
     torch.save(discriminator, FINAL_MODEL_DIR + '{}'.format(total_steps) + 'resnet.pth')
+    writer.close()
 
 
 if __name__ == '__main__':
     args = parse_arguments()
+    args_dict = vars(args)
+    writer.add_text("hyper_parameters", "Arguments0: " + str(args_dict), global_step=4)
+
     main(args.data_dir, args.batch_size, args.batches_in_episode, args.lr_discriminator, args.device_discriminator,
-         args.lr_generator, args.total_steps, args.device_generator, args.blender_add)
+         args.lr_generator, args.total_steps, args.device_generator, args.blender_add, args.blend_file)
