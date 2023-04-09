@@ -204,8 +204,6 @@ class Penv(gym.Env):
         self.state = [32]
         self.spacer_data = os.listdir(self.spacer_data_dir)
         self.episode_length = episode_length
-        self.generator_acc_mean = []
-        self.avg_brightness_mean = []
         self.time_step = -1
         self.episodes = 0
         self.epoch = 0
@@ -215,6 +213,9 @@ class Penv(gym.Env):
         self.discriminator_loss = 0
         self.batch_size = batch_size
         self.generator_loss_mean = []
+        self.generator_loss = []
+        self.generator_acc_mean = []
+        self.avg_brightness_mean = []
         self.buffer_act_spacer = deque(maxlen=self.episode_length)
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
         self.disc_buffer_act_spacer = deque(maxlen=self.episode_length * 10)
@@ -457,6 +458,7 @@ class Penv(gym.Env):
             self.target_disc_loss = self.target_gen_loss
 
         if self.done:
+            self.generator_loss.append(np.mean(self.generator_loss_mean))
             print('\033[1mgen_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen&disc_loss',
                   self.target_gen_loss,
                   'gen_loss_mean:', np.mean(self.generator_loss_mean), '\033[0m', end='\n\n')
@@ -466,7 +468,8 @@ class Penv(gym.Env):
             self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
 
             #   Discriminator Training
-        if self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss:
+        if (self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss)\
+                or is_loss_stagnated(self.generator_loss):
             if not self.disc_buffer_act_spacer:
                 self.disc_buffer_act_spacer.extend(self.buffer_act_spacer)
                 self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
