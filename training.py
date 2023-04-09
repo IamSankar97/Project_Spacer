@@ -548,14 +548,14 @@ def parse_arguments():
     parser.add_argument('--data_dir', type=str,
                         default='/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/',
                         help='Cropped spacer images for discriminator training')
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=1, help='Episode length = batch_size * '
+    parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
                                                                            'batches_in_episode')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
 
     parser.add_argument('--lr_generator', type=float, default=0.001, help='Learning rate for generator PPO')
-    parser.add_argument('--total_steps', type=int, default=0.00001, help='Total steps for PPO to be trained')
+    parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=0, help='Generator device')
     parser.add_argument('--blender_add', type=int, default=10, help='Generator device')
     return parser.parse_args()
@@ -594,7 +594,7 @@ def main(data_dir,
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
     model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=lr_generator,
-                batch_size=batch_size, n_steps=episode_length, n_epochs=20, clip_range=.1, gamma=.95, gae_lambda=.9,
+                batch_size=batch_size, n_steps=episode_length, n_epochs=10, clip_range=.1, gamma=.95, gae_lambda=.9,
                 policy_kwargs=policy_kwargs,
                 seed=seed_, device=device_1)
 
