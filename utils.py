@@ -246,9 +246,10 @@ def is_loss_stagnated(loss_list, window_size=100, threshold=1e-4):
     std_dev = np.std(last_losses)
     min_last_loss = min(last_losses)
     min_last_last_loss = min(last_to_last_losses)
-    if std_dev < threshold or min_last_last_loss >= min_last_loss:
+    min_ls_diff = abs(min_last_last_loss-min_last_loss)
+    if std_dev < threshold or min_ls_diff < 0.001:
         print('std_dev:', std_dev, 'threshold:', threshold,
-              'min_last_last_loss:', min_last_last_loss, 'min_last_loss:', min_last_loss)
+              'min_last_last_loss:', min_last_last_loss, 'min_last_loss:', min_last_loss, 'mi_ls_diff:', min_ls_diff)
         return True
     else:
         return False
