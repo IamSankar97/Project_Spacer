@@ -126,42 +126,55 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         This corresponds to the number of unit for the last layer.
     """
 
-    def __init__(self, observation_space, features_dim: int = 512):
+    def __init__(self, observation_space, features_dim: int = 512, scalar=False):
         super().__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space['0image'].shape[0]
-        self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-1]).extend(
+        self.scalar = scalar
+        self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-2]).extend(
             [torch.nn.Flatten()])
 
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten_img = self.cnn(torch.as_tensor(observation_space['0image'].sample()[None]).float()).shape[1]
-        self.n_scalar = observation_space['scalar'].shape[0]
-        self.n_img = len(observation_space.spaces) - self.n_scalar
-        self.dropout0 = nn.Dropout(p=0.3)
-        self.linear0 = nn.Linear(n_flatten_img, 100)
-        self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
-        self.dropout1 = nn.Dropout(p=0.3)
-        self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
+        if self.scalar:
+            self.n_scalar = observation_space['scalar'].shape[0]
+            self.n_img = len(observation_space.spaces) - self.n_scalar
+            self.dropout0 = nn.Dropout(p=0.3)
+            self.linear0 = nn.Linear(n_flatten_img, 100)
+            self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
+            self.dropout1 = nn.Dropout(p=0.3)
+            self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
+
+        else:
+            self.n_img = len(observation_space.spaces)
+            # self.dropout0 = nn.Dropout(p=0.2)
+            self.linear0 = nn.Linear(n_flatten_img, 100)
+            self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
+            # self.dropout1 = nn.Dropout(p=0.2)
+            self.linear2 = nn.Linear(features_dim * 3, features_dim)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        scalar_obs = observations['scalar']
-        del observations['scalar']
+        if self.scalar:
+            scalar_obs = observations['scalar']
+            del observations['scalar']
 
         img_features = []
         for _, value in observations.items():
             cnn_output = self.cnn(value)
-            cnn_drop = self.dropout0(cnn_output)
-            linear0 = torch.relu(self.linear0(cnn_drop))
+            # cnn_output = self.dropout0(cnn_output)
+            linear0 = torch.relu(self.linear0(cnn_output))
             img_features.append(linear0)
             # cnn_reshape = torch.reshape(cnn_output, (img_obs.shape[0], self.select_crops.size()[0], cnn_output.shape[1]))
 
         cnn_output = torch.cat(img_features, dim=1)
         x = torch.relu(self.linear1(cnn_output))
-        x = self.dropout1(x)
-        x = torch.relu(self.linear2(x))
-        out_features = torch.cat((x, scalar_obs), dim=-1)
+        # x = self.dropout1(x)
+        out_features = torch.relu(self.linear2(x))
+        if self.scalar:
+            out_features = torch.cat((x, scalar_obs), dim=-1)
+
         return out_features
 
 
@@ -191,7 +204,7 @@ class Penv(gym.Env):
         self.spacer_data_dir = dat_dir
         self.discriminator = discriminator
         self.disc_device = device_discriminator
-        self.train_discriminator = train_discriminator
+        self.train_disc = train_discriminator
         self.dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr_discriminator, betas=(0.5, 0.999),
                                               weight_decay=weight_decay)
         self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, blend_file=blend_file,
@@ -275,14 +288,15 @@ class Penv(gym.Env):
 
         return fake_spacer, info
 
-    def _get_obs_space(self):
+    def _get_obs_space(self, scalar=False):
         fake_spacer, _ = self.get_fake_data(self.action_space.sample())
         self.no_img_obs = len(fake_spacer)
         obs_space = {}
         for i in range(self.no_img_obs):
             obs_space.update({'{}image'.format(i): spaces.Box(low=0, high=255,
                                                               shape=self.img_size + (1,), dtype=np.uint8)})
-        obs_space.update({'scalar': spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float64)})
+        if scalar:
+            obs_space.update({'scalar': spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float64)})
 
         return obs_space
 
@@ -339,7 +353,7 @@ class Penv(gym.Env):
         return fake_spacer
 
     def initialize_discriminator(self):
-        if self.train_discriminator:
+        if self.train_disc:
             ortho_actions = pd.DataFrame(get_orth_actions(self.action_space.shape[0]))
             noise_std, theta, dt = 0.12, 0.15, 1e-2
 
@@ -385,11 +399,14 @@ class Penv(gym.Env):
             torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR,
                                                         'Resnet_disc_model_{}_{}.pth'.format('pretrain', self.epoch)))
 
-    def get_state(self, fake_spacer):
+    def get_state(self, fake_spacer, scalar=False):
 
         obs_imgs = np.expand_dims(fake_spacer, axis=-1)
-        obs_imgs = OrderedDict(zip(list(self.observation_space.spaces.keys())[:-1], obs_imgs))
-        obs_imgs['scalar'] = self.avg_brightness
+        if scalar:
+            obs_imgs = OrderedDict(zip(list(self.observation_space.spaces.keys())[:-1], obs_imgs))
+            obs_imgs['scalar'] = self.avg_brightness
+        else:
+            obs_imgs = OrderedDict(zip(list(self.observation_space.spaces.keys()), obs_imgs))
         return obs_imgs
 
     def reset(self):
@@ -425,7 +442,7 @@ class Penv(gym.Env):
         self.state = self.get_state(fake_spacer)
 
         #   Check if the action has failed
-        failed_action = 1 if np.all(fake_spacer == 0) else 0
+        # failed_action = 1 if np.all(fake_spacer == 0) else 0
 
         #   Calculate loss that is mse, kl_divergent, l1_loss and cross_entropy
         criterion_mse = nn.MSELoss()
@@ -466,7 +483,7 @@ class Penv(gym.Env):
                   'gen_loss_mean:', np.mean(self.generator_loss_mean), '\033[0m', end='\n\n')
 
         #   Collect Datas in lists
-        if self.train_discriminator:
+        if self.train_disc:
             self.buffer_act_spacer.append(actual_spacer)
             self.buffer_fake_spacer.append(fake_spacer)
 
@@ -553,7 +570,7 @@ class Penv(gym.Env):
                                               'avg_brightness', 'reward', 'disc_real_score', 'disc_fake_score',
                                               'generator_acc'])
 
-        self.action_paired.update({'failed_action': failed_action})
+        # self.action_paired.update({'failed_action': failed_action})
         log_dict_to_tensorboard(self.action_paired, category='action', step=self.time_step)
         log_dict_to_tensorboard(gen_parameters, category='gen_param', step=self.time_step)
         log_to_file(log_info, train_log)
@@ -562,22 +579,21 @@ class Penv(gym.Env):
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str,
-                        default='/home/mohanty/PycharmProjects/Data/spacer_data/train_64*64*32/good/',
+    parser.add_argument('--data_dir', type=str, default='/home/mohanty/PycharmProjects/Data/data_128/train/good/',
                         help='Cropped spacer images for discriminator training')
-    parser.add_argument('--img_size', nargs='*', type=int, default=[64, 64], help='img_size of discriminator training')
-    parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
+    parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=5, help='Episode length = batch_size * '
                                                                           'batches_in_episode')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
     parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
 
     parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
-    parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
-    parser.add_argument('--device_generator', type=int, default=0, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=10, help='Generator device')
-    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_new_materail2.blend',
+    parser.add_argument('--total_steps', type=int, default=10, help='Total steps for PPO to be trained')
+    parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
+    parser.add_argument('--blender_add', type=int, default=10, help='Blendtorch launcher address')
+    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_new_materail3.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
 
@@ -591,7 +607,7 @@ def main(data_dir, img_size, batch_size, batches_in_episode, lr_discriminator, w
     device_0 = get_device('{}'.format(device_discriminator))
     device_1 = get_device('{}'.format(device_generator))
     discriminator = torch.load('/home/mohanty/PycharmProjects/train_logs_disc/spacer2023-04-12 '
-                               '02:03:22/PPO_model/Resnet_disc_model_pretrain_99.pth')
+                               '17:49:47/PPO_model/Resnet_disc_model_pretrain_25.pth')
     discriminator = to_device(discriminator, device_0)
     writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=5)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
