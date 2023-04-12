@@ -4,6 +4,9 @@
 
 import sys
 import os
+
+from skimage.util import view_as_windows
+
 sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
@@ -49,6 +52,11 @@ class SpacerEnv(btb.env.BaseEnv):
         self.topology_dir = '/home/mohanty/PycharmProjects/Data/pkl_6/'
         self.g_time_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.topologies = os.listdir(self.topology_dir)
+        self.x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
+                         28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
+
+        self.y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
+                         18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
         #   (3)
         self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
         #   (1)
@@ -154,13 +162,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.episodes += 1
         self.step = 0
 
-        self.file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/full/{}'.format(
-            self.g_time_stamp, self.episodes)
-        self.file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/croped/{}'.format(
-            self.g_time_stamp, self.episodes)
-        os.makedirs(self.file_path_full, exist_ok=True)
-        os.makedirs(self.file_path_croped, exist_ok=True)
-
         # Generate random Gaussian noise
         noise = np.random.normal(scale=0.1, size=len(self.reset_action))
 
@@ -190,24 +191,32 @@ class SpacerEnv(btb.env.BaseEnv):
         global r_
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-        file_path = self.file_path_full + '/image{}_{}.png'.format(self.episodes, self.step)
+        file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/full/{}'.format(
+            self.g_time_stamp, self.episodes)
+        os.makedirs(file_path_full, exist_ok=True)
+        file_path = file_path_full + '/image{}_{}.png'.format(self.episodes, self.step)
 
         pil_img = off.render(file_path)
         # pil_img.show()
         gray_img = np.array(pil_img, dtype=np.uint8)
-        ret, binary_img = cv2.threshold(gray_img, 1.3, 255, cv2.THRESH_BINARY)
-        RM_BG_img = cv2.bitwise_and(gray_img, gray_img, mask=binary_img)
+        # ret, binary_img = cv2.threshold(gray_img, 1.0, 255, cv2.THRESH_BINARY)
+        # RM_BG_img = cv2.bitwise_and(gray_img, gray_img, mask=binary_img)
         # blur_img = cv2.GaussianBlur(RM_BG_img, (3, 3), 0)
-        obs = Image.fromarray(RM_BG_img)
+        # obs = Image.fromarray(RM_BG_img)
         # obs.show()
-        obs = np.asarray(augument(obs), dtype=np.uint8)
+        # obs = np.asarray(RM_BG_img, dtype=np.uint8)
 
-        # self.state = get_circular_corps(obs, step_angle=20, radius=850, address=self.file_path_croped + '/{}_{}_'.format(self.episodes, self.step))
-        self.state = get_no_defect_crops(obs, win_size=(64, 64), step_size=64)
-        self.state = Image.fromarray(np.hstack(self.state))
+        # self.state = get_circular_corps(obs, step_angle=20, radius=850, address=self.file_path_croped + '/{}_{}_'
+        # .format(self.episodes, self.step))
+        windows = view_as_windows(gray_img, (128, 128), step=64)
+        result_windows = windows[self.y_128_64, self.x_128_64]
+        self.state = Image.fromarray(np.hstack(result_windows))
 
         if self.episodes % 60 == 0:
-            self.state.save(self.file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
+            file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/croped/{}'.format(
+                self.g_time_stamp, self.episodes)
+            os.makedirs(file_path_croped, exist_ok=True)
+            self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
 
         return dict(obs=self.state, reward=r_, done=done, action_pair=self.action_inverted)
