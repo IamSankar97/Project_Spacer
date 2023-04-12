@@ -533,7 +533,7 @@ class Penv(gym.Env):
                                                                     'Resnet_disc_model_{}_ep{}.pth'.format(
                                                                         self.time_step,
                                                                         self.epoch)))
-                if break_outer_loop:
+                if break_outer_loop or count >= self.batch_size*1000:
                     break
             self.target_gen_loss -= 0.25
 
