@@ -101,7 +101,7 @@ def get_image_dataloader(spacer_data_dir=None, shuffle=True):
     dataset = ImageFolder(root=spacer_data_dir, transform=transform)
 
     # Create the dataloader
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=shuffle,)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=100, shuffle=shuffle, )
 
     return dataloader
 
@@ -112,6 +112,7 @@ dir = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/Discrimina
 # Create the train dataloader
 train_dataloader = get_image_dataloader(dir, shuffle=True)
 
+
 def main():
     discriminator = resnet.resnet10(1, 2)
     device = get_device('1')
@@ -121,8 +122,8 @@ def main():
     disc_ls_epoch = []
     for epoch in range(100):
         disc_fk_score, disc_rl_score, disc_ls = [], [], []
+        batch = 0
         for inputs, labels in train_dataloader:
-
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -138,12 +139,13 @@ def main():
 
             discriminator_loss, disc_real_score, disc_fake_score = train_discriminator(discriminator, dic_optimizer,
                                                                                        disc_device, actual_spacer,
-                                                                                       fake_spacer)
+                                                                                       fake_spacer, clip=True)
             disc_fk_score.append(disc_fake_score)
             disc_ls.append(discriminator_loss)
             disc_rl_score.append(disc_real_score)
+            batch += 1
 
-            print('\033[1mEpoch:', epoch, 'disc_ls:', np.mean(disc_ls), 'disc_rl_score:',
+            print('\033[1mEpoch:', epoch, 'batch', batch, 'disc_ls:', np.mean(disc_ls), 'disc_rl_score:',
                   np.mean(disc_rl_score), 'disc_fk_score:', np.mean(disc_fk_score), '\033[0m', end='\n\n')
 
         log_dict_to_tensorboard({'disc_ls': np.mean(disc_ls), 'disc_rl_score': np.mean(disc_rl_score),
@@ -154,10 +156,12 @@ def main():
 
         if is_loss_stagnated(disc_ls_epoch, window_size=10, threshold=1e-3):
             print('stopping disc training as discriminator_loss has stagnated or target ls reached')
+            torch.save(discriminator, os.path.join(CHECKPOINT_DIR,
+                                                   'Resnet_disc_model_{}_{}.pth'.format('pretrain', epoch)))
             break
-
-    torch.save(discriminator, os.path.join(CHECKPOINT_DIR,
-                                           'Resnet_disc_model_{}_{}.pth'.format('pretrain', epoch)))
+        if epoch != 0 and epoch % 25 == 0:
+            torch.save(discriminator, os.path.join(CHECKPOINT_DIR,
+                                                   'Resnet_disc_model_{}_{}.pth'.format('pretrain', epoch)))
 
 
 if __name__ == '__main__':
