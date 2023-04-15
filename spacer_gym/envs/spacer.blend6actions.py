@@ -26,7 +26,7 @@ from spacer import Spacer
 import datetime
 from img_processing import remove_back_ground
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 class SpacerEnv(btb.env.BaseEnv):
@@ -58,7 +58,7 @@ class SpacerEnv(btb.env.BaseEnv):
         #   (3)
         self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
         #   (1)
-        self.action_mix = {'Factor': [0.0, 0.4]}
+        self.action_mix = {'Factor': [0.0, 0.3]} #{'Factor': [0.0, 0.4]} old noise material3
         #   (1)
         self.action_light_cmn = {"value": [0.8, 1]}
         #   (1)
@@ -138,9 +138,6 @@ class SpacerEnv(btb.env.BaseEnv):
         return action_inverse_normalized
 
     def _env_prepare_step(self, actions: np.ndarray):
-        self.step += 1
-        self.total_step += 1
-
         self.take_action(actions)
         # spacer = self.get_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
@@ -166,10 +163,11 @@ class SpacerEnv(btb.env.BaseEnv):
 
         # spacer = self.reset_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
-        self.total_step += 1
         return self._env_post_step()
 
     def _env_post_step(self):
+        self.step += 1
+        self.total_step += 1
         self.update_scene()
 
         # Setup default image rendering
@@ -197,7 +195,7 @@ class SpacerEnv(btb.env.BaseEnv):
         result_windows = windows[self.y_128_64, self.x_128_64]
         self.state = Image.fromarray(np.hstack(result_windows))
 
-        if self.episodes % 60 == 0:
+        if self.total_step % 60 == 0:
             file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/croped/{}'.format(
                 self.g_time_stamp, self.episodes)
             os.makedirs(file_path_croped, exist_ok=True)
@@ -216,9 +214,7 @@ class SpacerEnv(btb.env.BaseEnv):
 
         actions_inverse_cmn_ligt = self.inverse_normalization(self.action_light_cmn)
         actions_inverse_specifice_ligt = self.inverse_normalization(self.action_light)
-        self.update_lights(actions_inverse_cmn_ligt['value'], actions_inverse_specifice_ligt['energy0'],
-                           actions_inverse_specifice_ligt['Spread'], actions_inverse_specifice_ligt['ro_x'],
-                           actions_inverse_specifice_ligt['ro_y'])
+        self.update_lights(actions_inverse_cmn_ligt['value'], actions_inverse_specifice_ligt['energy0'])
 
         self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_cmn_ligt,
                                 **actions_inverse_specifice_ligt}
@@ -252,7 +248,7 @@ class SpacerEnv(btb.env.BaseEnv):
         texture_node = self.texture_nodes['Mix (Legacy)']
         texture_node.inputs['Fac'].default_value = factor
 
-    def update_lights(self, value, energy0, Spread, ro_x, ro_y):
+    def update_lights(self, value, energy0):
         #   set color
         existing_rgb = self.light0.color[:3]
         h, s, v = colorsys.rgb_to_hsv(*existing_rgb)
@@ -262,10 +258,11 @@ class SpacerEnv(btb.env.BaseEnv):
         self.light0.color = rgb_color + dummy_alpha
         #   set energy
         self.light0.data.energy = energy0
-        self.light0.data.spread = Spread
-        #   set light angle
-        self.light0.rotation_euler.x = ro_x
-        self.light0.rotation_euler.y = ro_y
+        # Exclude for 6 actions
+        # self.light0.data.spread = Spread
+        # #   set light angle
+        # self.light0.rotation_euler.x = ro_x
+        # self.light0.rotation_euler.y = ro_y
 
     def update_clr_ramp(self, Pos_black, Pos_white):
         color_ramp_node = self.texture_nodes['ColorRamp']
