@@ -571,7 +571,7 @@ def parse_arguments():
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
     parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
-    parser.add_argument('--retrain_disc', type=bool, default=True, help='Discriminator device')
+    parser.add_argument('--retrain_disc', type=bool, default=False, help='Discriminator device')
 
     parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
