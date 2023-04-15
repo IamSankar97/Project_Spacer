@@ -1,4 +1,5 @@
 import argparse
+import math
 
 import gym
 from gym import spaces
@@ -193,8 +194,9 @@ class Penv(gym.Env):
     def __init__(self, img_size, batch_size, episode_length, dat_dir, discriminator, lr_discriminator, weight_decay,
                  device_discriminator, train_discriminator, blender_add, blend_file):
         super(Penv, self).__init__()
+        self.disc_train_epoch = 0
         self.target_gen_loss = 0
-        self.target_disc_loss = 0.001
+        self.target_disc_loss = 0
         self.img_size = img_size
         self.disc_ls_epoch = []
         self.disc_ls = None
@@ -213,7 +215,7 @@ class Penv(gym.Env):
         self.environments.reset()
         self.action_paired = {}
         # logging must be after environment generation
-        self.action_space = spaces.Box(-1, 1, shape=(11,))
+        self.action_space = spaces.Box(-1, 1, shape=(6,))
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.actual_dataloader = self.get_image_dataloader()
         # derived by calculating avg value over all the available fake images of shape 64*64
@@ -240,7 +242,7 @@ class Penv(gym.Env):
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
         self.disc_buffer_act_spacer = deque(maxlen=self.episode_length * 10)
         self.disc_buffer_fake_spacer = deque(maxlen=self.episode_length * 10)
-        self.initialize_discriminator()
+        # self.initialize_discriminator()
 
     def train_discriminator(self, real_images, fake_images, clip=False):
         # Clear discriminator gradients
@@ -442,8 +444,6 @@ class Penv(gym.Env):
         self.state = self.get_state(fake_spacer)
 
         #   Check if the action has failed
-        # failed_action = 1 if np.all(fake_spacer == 0) else 0
-
         #   Calculate loss that is mse, kl_divergent, l1_loss and cross_entropy
         criterion_mse = nn.MSELoss()
         criterion_kl = nn.KLDivLoss()
@@ -468,44 +468,35 @@ class Penv(gym.Env):
         self.cross_entropy = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
         self.generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
 
-        #   Caculate Reward
-        self.reward = -self.cross_entropy
+        #   Calculate Reward
+        self.reward = -self.cross_entropy  # - (100 * self.l1_loss)
 
         self.generator_acc_mean.append(self.generator_acc)
         self.generator_loss_mean.append(self.cross_entropy)
         self.avg_brightness_mean.append(self.avg_brightness)
         self.done = self.chk_termination()
+        self.disc_buffer_act_spacer.append(actual_spacer)
+        self.disc_buffer_fake_spacer.append(fake_spacer)
 
         if self.done:
             self.generator_loss.append(np.mean(self.generator_loss_mean))
-            print('\033[1mgen_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen&disc_loss',
-                  self.target_gen_loss,
+            print('\033[1mgen_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen&disc_ls', self.target_gen_loss,
                   'gen_loss_mean:', np.mean(self.generator_loss_mean), '\033[0m', end='\n\n')
 
-        #   Collect Datas in lists
-        if self.train_disc:
-            self.buffer_act_spacer.append(actual_spacer)
-            self.buffer_fake_spacer.append(fake_spacer)
-
-            if self.done and self.episodes == 1:
-                self.target_gen_loss = 2
-                self.target_disc_loss = self.target_gen_loss
-
-            if self.done and np.mean(self.generator_loss_mean) > self.target_gen_loss:
-                self.disc_buffer_act_spacer.extend(self.buffer_act_spacer)
-                self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
-
-                #   Discriminator Training
-            if (self.done and np.mean(self.generator_loss_mean) < self.target_gen_loss) \
+        #   Collect Data's in lists if Discriminator is to be retrained.
+        if self.done and self.train_disc:
+            self.target_gen_loss = 1 * math.exp(-self.disc_train_epoch / 10)
+            #   Discriminator Training
+            if (self.done and self.generator_loss[-1] < self.target_gen_loss) \
                     or is_loss_stagnated(self.generator_loss):
-                if not self.disc_buffer_act_spacer:
-                    self.disc_buffer_act_spacer.extend(self.buffer_act_spacer)
-                    self.disc_buffer_fake_spacer.extend(self.buffer_fake_spacer)
+                self.disc_train_epoch += 1
+                self.target_disc_loss = 1 * math.exp(-self.disc_train_epoch / 10)
 
                 buffer_act_spacer = torch.stack(list(self.disc_buffer_act_spacer))
                 buffer_fake_spacer = torch.stack(list(self.disc_buffer_fake_spacer))
                 break_outer_loop = False
                 while True:
+                    self.epoch += 1
                     #   Generate a random permutation of indices along the second dimension
                     # same indices for both actual and real spacer
                     indices0 = torch.randperm(buffer_act_spacer.size(1), device=device)
@@ -515,7 +506,6 @@ class Penv(gym.Env):
                         torch.index_select(buffer_fake_spacer, 1, indices1)
                     self.disc_fk_score, self.disc_rl_score, self.disc_ls = [], [], []
 
-                    count = 0
                     for actual_spacer_n, fake_spacer_n in zip(buffer_act_spacer, buffer_fake_spacer):
                         discriminator_loss, disc_real_score, disc_fake_score = \
                             self.train_discriminator(actual_spacer_n, fake_spacer_n)
@@ -524,39 +514,31 @@ class Penv(gym.Env):
                         self.disc_rl_score.append(disc_real_score)
                         self.disc_fk_score.append(disc_fake_score)
 
-                        count += 1
-                        if count == self.batch_size:
-                            self.epoch += 1
-                            self.disc_ls_epoch.append(np.mean(self.disc_ls))
+                    self.disc_ls_epoch.append(np.mean(self.disc_ls))
 
-                            print('\033[1mEpoch:', self.epoch, 'disc_ls:', np.mean(self.disc_ls), 'disc_rl_score:',
-                                  np.mean(self.disc_rl_score), 'disc_fk_score:', np.mean(self.disc_fk_score), '\033[0m',
-                                  end='\n\n')
+                    print('\033[1mEpoch:', self.epoch, 'disc_ls:', np.mean(self.disc_ls), 'disc_rl_score:',
+                          np.mean(self.disc_rl_score), 'disc_fk_score:', np.mean(self.disc_fk_score), '\033[0m',
+                          end='\n\n')
 
-                            log_dict_to_tensorboard(
-                                {'disc_ls': np.mean(self.disc_ls), 'disc_rl_score': np.mean(self.disc_rl_score),
-                                 'dict_fk_score': np.mean(self.disc_fk_score)}, category='disc_perf',
-                                step=self.epoch)
+                    log_dict_to_tensorboard(
+                        {'disc_ls': np.mean(self.disc_ls), 'disc_rl_score': np.mean(self.disc_rl_score),
+                         'dict_fk_score': np.mean(self.disc_fk_score)}, category='disc_perf',
+                        step=self.epoch)
 
-                            if is_loss_stagnated(self.disc_ls_epoch, window_size=self.episode_length * 2,
-                                                 threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
-                                print('\033[stopping disc training as discriminator_loss has stagnated'
-                                      ' or disc_loss{} < target{}'.format(np.mean(self.disc_ls), self.target_disc_loss),
-                                      '\033[0m')
-                                self.target_disc_loss -= 0.25
-                                break_outer_loop = True
-                                break
-
-                            self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(self.disc_ls), \
-                                np.mean(self.disc_rl_score), np.mean(self.disc_fk_score)
-
-                            torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR,
-                                                                        'Resnet_disc_model_{}_ep{}.pth'.format(
-                                                                            self.time_step,
-                                                                            self.epoch)))
-                    if break_outer_loop or count >= self.batch_size * 1000:
+                    if is_loss_stagnated(self.disc_ls_epoch, window_size=self.episode_length * 2,
+                                         threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
+                        print('\033[stopping disc training as discriminator_loss has stagnated'
+                              ' or disc_loss{} < target{}'.format(np.mean(self.disc_ls), self.target_disc_loss),
+                              '\033[0m')
                         break
-                self.target_gen_loss -= 0.25
+
+                    self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(self.disc_ls), \
+                        np.mean(self.disc_rl_score), np.mean(self.disc_fk_score)
+
+                    torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR, 'Resnet_disc_model_{}_ep{}.pth'.format(
+                        self.time_step, self.epoch)))
+
+                # self.target_gen_loss = self.target_gen_loss * math.exp(-self.disc_train_epoch*10)
 
             #   Logging when discriminator trains
             log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'cross_entropy',
@@ -566,9 +548,8 @@ class Penv(gym.Env):
             log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'cross_entropy', 'done',
                                             'avg_brightness', 'kl', 'generator_acc', 'mse', 'reward'])
 
-        gen_parameters = self.get_attributes(['episodes', 'cross_entropy', 'mse', 'kl', 'l1_loss',
-                                              'avg_brightness', 'reward', 'disc_real_score', 'disc_fake_score',
-                                              'generator_acc'])
+        gen_parameters = self.get_attributes(['episodes', 'cross_entropy', 'mse', 'kl', 'l1_loss', 'avg_brightness',
+                                              'reward', 'generator_acc'])
 
         # self.action_paired.update({'failed_action': failed_action})
         log_dict_to_tensorboard(self.action_paired, category='action', step=self.time_step)
@@ -582,44 +563,49 @@ def parse_arguments():
     parser.add_argument('--data_dir', type=str, default='/home/mohanty/PycharmProjects/Data/data_128/train/good/',
                         help='Cropped spacer images for discriminator training')
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=5, help='Episode length = batch_size * '
-                                                                          'batches_in_episode')
+    parser.add_argument('--batch_size', type=int, default=6, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=168, help='Episode length = batch_size * '
+                                                                            'batches_in_episode')
+    parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
+                                                                 'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
-    parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
+    parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
+    parser.add_argument('--retrain_disc', type=bool, default=True, help='Discriminator device')
 
     parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
-    parser.add_argument('--total_steps', type=int, default=10, help='Total steps for PPO to be trained')
+    parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=10, help='Blendtorch launcher address')
-    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_new_materail3.blend',
+    parser.add_argument('--blender_add', type=int, default=5, help='Blendtorch launcher address')
+    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
 
 
-def main(data_dir, img_size, batch_size, batches_in_episode, lr_discriminator, weight_decay, device_discriminator,
-         lr_generator, total_steps, device_generator, blender_add, blend_file):
+def main(data_dir, img_size, batch_size, batches_in_episode, n_epochs, lr_discriminator, weight_decay,
+         device_discriminator, retrain_disc, lr_generator, total_steps, device_generator, blender_add, blend_file):
     batch_size = batch_size
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
     episode_length = batch_size * batches_in_episode
 
     device_0 = get_device('{}'.format(device_discriminator))
     device_1 = get_device('{}'.format(device_generator))
-    discriminator = torch.load('/home/mohanty/PycharmProjects/train_logs_disc/spacer2023-04-12 '
-                               '17:49:47/PPO_model/Resnet_disc_model_pretrain_25.pth')
+    disc_file = '/home/mohanty/PycharmProjects/train_logs_disc/spacer2023-04-14 ' \
+                '02:14:14/PPO_model/Resnet_disc_model_pretrain_4.pth'
+    discriminator = torch.load(disc_file)
     discriminator = to_device(discriminator, device_0)
     writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=5)
+    writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=5)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
 
     py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length, dat_dir=data_dir,
                           discriminator=discriminator, lr_discriminator=lr_discriminator, weight_decay=weight_decay,
-                          device_discriminator=device_0, train_discriminator=False, blender_add=blender_add,
+                          device_discriminator=device_0, train_discriminator=retrain_disc, blender_add=blender_add,
                           blend_file=blend_file))
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
-    policy_kwargs = dict(net_arch=dict(pi=[100, 64, 32], vf=[100, 64, 32]),
+    policy_kwargs = dict(net_arch=dict(pi=[200, 100, 100], vf=[200, 100, 100]),
                          features_extractor_class=CustomImageExtractor)
 
     logging_callback = TrainAndLoggingCallback(check_freq=episode_length, save_path=CHECKPOINT_DIR)
@@ -633,7 +619,8 @@ def main(data_dir, img_size, batch_size, batches_in_episode, lr_discriminator, w
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
     model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=lr_generator,
-                batch_size=batch_size, n_steps=episode_length, n_epochs=10, clip_range=.1, gamma=.95, gae_lambda=.9,
+                batch_size=batch_size, n_steps=episode_length, n_epochs=n_epochs, clip_range=.1, gamma=.95,
+                gae_lambda=.9,
                 policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
 
     model.set_logger(new_logger)
@@ -651,6 +638,6 @@ if __name__ == '__main__':
     args_dict = vars(args)
     writer.add_text("hyper_parameters", "Arguments0: " + str(args_dict), global_step=4)
 
-    main(args.data_dir, tuple(args.img_size), args.batch_size, args.batches_in_episode, args.lr_discriminator,
-         args.weight_decay, args.device_discriminator, args.lr_generator, args.total_steps, args.device_generator,
-         args.blender_add, args.blend_file)
+    main(args.data_dir, tuple(args.img_size), args.batch_size, args.batches_in_episode, args.n_epochs,
+         args.lr_discriminator, args.weight_decay, args.device_discriminator, args.retrain_disc, args.lr_generator,
+         args.total_steps, args.device_generator, args.blender_add, args.blend_file)
