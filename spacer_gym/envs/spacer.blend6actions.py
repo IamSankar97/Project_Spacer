@@ -4,7 +4,6 @@
 
 import sys
 import os
-
 from skimage.util import view_as_windows
 
 sys.path.append(os.getcwd())
@@ -58,15 +57,15 @@ class SpacerEnv(btb.env.BaseEnv):
         #   (3)
         self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
         #   (1)
-        self.action_mix = {'Factor': [0.0, 0.3]} #{'Factor': [0.0, 0.4]} old noise material3
+        self.action_mix = {'Factor': [0.0, 0.1]} #{'Factor': [0.0, 0.4]} old noise material3
         #   (1)
         self.action_light_cmn = {"value": [0.8, 1]}
         #   (1)
-        self.action_light = {'energy0': [0.001, 0.015]}
+        self.action_light = {'energy0': [0.01, 0.02]}
         # Total = 6
 
-        self.reset_action = {'specular': 0.5, 'ior': 2.3, 'roughness': 0.2, 'factor': 0.1, "value": 0.8,
-                             'energy0': 0.005, 'ro_z': 0}
+        self.reset_action = {'specular': 0.2, 'ior': 2.3, 'roughness': 0.1, 'factor': 0.05, "value": 0.8,
+                             'energy0': 0.01, 'ro_z': 0}
         self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light_cmn, **self.action_light}
         self.action_keys = list(self.action_bound.keys())
         self.update_scene()
@@ -138,6 +137,8 @@ class SpacerEnv(btb.env.BaseEnv):
         return action_inverse_normalized
 
     def _env_prepare_step(self, actions: np.ndarray):
+        self.step += 1
+        self.total_step += 1
         self.take_action(actions)
         # spacer = self.get_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
@@ -166,8 +167,6 @@ class SpacerEnv(btb.env.BaseEnv):
         return self._env_post_step()
 
     def _env_post_step(self):
-        self.step += 1
-        self.total_step += 1
         self.update_scene()
 
         # Setup default image rendering
@@ -177,7 +176,7 @@ class SpacerEnv(btb.env.BaseEnv):
         file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/full/{}'.format(
             self.g_time_stamp, self.episodes)
         os.makedirs(file_path_full, exist_ok=True)
-        file_path = file_path_full + '/image{}_{}.png'.format(self.episodes, self.step)
+        file_path = file_path_full + '/image{}_{}.png'.format(self.episodes, self.total_step)
 
         pil_img = off.render(file_path)
         # pil_img.show()
@@ -197,7 +196,7 @@ class SpacerEnv(btb.env.BaseEnv):
 
         if self.total_step % 60 == 0:
             file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/croped/{}'.format(
-                self.g_time_stamp, self.episodes)
+                self.g_time_stamp, self.total_step)
             os.makedirs(file_path_croped, exist_ok=True)
             self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
