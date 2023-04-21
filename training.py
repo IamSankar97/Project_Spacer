@@ -113,9 +113,9 @@ class TrainAndLoggingCallback(BaseCallback):
             self.model.save(gen_model_path)
 
             self.logger.record('GAN_loss/ep_gen_loss', np.mean(self.training_env.get_attr('generator_loss_mean')))
+            self.logger.record('GAN_loss/ep_l1_loss', np.mean(self.training_env.get_attr('l1_loss_mean')))
             self.logger.record('GAN_loss/generator_acc_mean', np.mean(self.training_env.get_attr('generator_acc_mean')))
-            self.logger.record('GAN_loss/avg_brightness_mean',
-                               np.mean(self.training_env.get_attr('avg_brightness_mean')))
+            self.logger.record('GAN_loss/avg_brightness_mean', np.mean(self.training_env.get_attr('avg_brightness_mean')))
 
             return True
 
@@ -191,9 +191,10 @@ class CustomDataset(torch.utils.data.Dataset):
 
 
 class Penv(gym.Env):
-    def __init__(self, img_size, batch_size, episode_length, dat_dir, discriminator, lr_discriminator, weight_decay,
+    def __init__(self, img_size, batch_size, episode_length, loss_weight, dat_dir, discriminator, lr_discriminator, weight_decay,
                  device_discriminator, train_discriminator, blender_add, blend_file):
         super(Penv, self).__init__()
+        self.loss_weight = loss_weight
         self.disc_train_epoch = 0
         self.target_gen_loss = 0
         self.target_disc_loss = 0
@@ -235,6 +236,7 @@ class Penv(gym.Env):
         self.discriminator_loss = 0
         self.batch_size = batch_size
         self.generator_loss_mean = []
+        self.l1_loss_mean = []
         self.generator_loss = []
         self.generator_acc_mean = []
         self.avg_brightness_mean = []
@@ -431,6 +433,7 @@ class Penv(gym.Env):
         self.time_step += 1
         if self.steps == 1:
             self.generator_loss_mean = []
+            self.l1_loss_mean = []
             self.generator_acc_mean = []
             self.avg_brightness_mean = []
 
@@ -444,14 +447,7 @@ class Penv(gym.Env):
         self.state = self.get_state(fake_spacer)
 
         #   Check if the action has failed
-        #   Calculate loss that is mse, kl_divergent, l1_loss and cross_entropy
-        criterion_mse = nn.MSELoss()
-        criterion_kl = nn.KLDivLoss()
-        actual_brightness = to_device(torch.from_numpy(self.avg_brightness), device=device)
-
-        self.mse = criterion_mse(self.mean_brightness, actual_brightness).detach().cpu().numpy().item()
-        self.kl = criterion_kl(self.mean_brightness, actual_brightness).detach().cpu().numpy().item()
-
+        #   Calculate loss that is l1_loss and cross_entropy
         fake_spacer = fake_spacer / 255
         actual_spacer, fake_spacer = to_device(actual_spacer, device), to_device(torch.from_numpy(fake_spacer.copy())
                                                                                  .unsqueeze(1).float(), device)
@@ -469,14 +465,16 @@ class Penv(gym.Env):
         self.generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
 
         #   Calculate Reward
-        self.reward = -self.cross_entropy  # - (100 * self.l1_loss)
+        self.reward = -self.cross_entropy - self.loss_weight*(100 * self.l1_loss)
 
         self.generator_acc_mean.append(self.generator_acc)
         self.generator_loss_mean.append(self.cross_entropy)
+        self.l1_loss_mean.append(self.l1_loss)
         self.avg_brightness_mean.append(self.avg_brightness)
         self.done = self.chk_termination()
-        self.disc_buffer_act_spacer.append(actual_spacer)
-        self.disc_buffer_fake_spacer.append(fake_spacer)
+        if self.train_disc:
+            self.disc_buffer_act_spacer.append(actual_spacer)
+            self.disc_buffer_fake_spacer.append(fake_spacer)
 
         if self.done:
             self.generator_loss.append(np.mean(self.generator_loss_mean))
@@ -543,12 +541,12 @@ class Penv(gym.Env):
             #   Logging when discriminator trains
             log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'cross_entropy',
                                             'disc_real_score', 'discriminator_loss', 'disc_fake_score', 'done',
-                                            'avg_brightness', 'kl', 'generator_acc', 'mse', 'reward'])
+                                            'avg_brightness', 'generator_acc', 'reward'])
         else:  # If discriminator is not trained
             log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'cross_entropy', 'done',
-                                            'avg_brightness', 'kl', 'generator_acc', 'mse', 'reward'])
+                                            'avg_brightness', 'generator_acc', 'reward'])
 
-        gen_parameters = self.get_attributes(['episodes', 'cross_entropy', 'mse', 'kl', 'l1_loss', 'avg_brightness',
+        gen_parameters = self.get_attributes(['episodes', 'cross_entropy', 'l1_loss', 'avg_brightness',
                                               'reward', 'generator_acc'])
 
         # self.action_paired.update({'failed_action': failed_action})
@@ -566,6 +564,7 @@ def parse_arguments():
     parser.add_argument('--batch_size', type=int, default=6, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=168, help='Episode length = batch_size * '
                                                                             'batches_in_episode')
+    parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
@@ -582,7 +581,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def main(data_dir, img_size, batch_size, batches_in_episode, n_epochs, lr_discriminator, weight_decay,
+def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epochs, lr_discriminator, weight_decay,
          device_discriminator, retrain_disc, lr_generator, total_steps, device_generator, blender_add, blend_file):
     batch_size = batch_size
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
@@ -598,10 +597,10 @@ def main(data_dir, img_size, batch_size, batches_in_episode, n_epochs, lr_discri
     writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=5)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
 
-    py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length, dat_dir=data_dir,
-                          discriminator=discriminator, lr_discriminator=lr_discriminator, weight_decay=weight_decay,
-                          device_discriminator=device_0, train_discriminator=retrain_disc, blender_add=blender_add,
-                          blend_file=blend_file))
+    py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length,
+                          loss_weight=loss_weight, dat_dir=data_dir, discriminator=discriminator,
+                          lr_discriminator=lr_discriminator, weight_decay=weight_decay, device_discriminator=device_0,
+                          train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file))
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
@@ -638,6 +637,6 @@ if __name__ == '__main__':
     args_dict = vars(args)
     writer.add_text("hyper_parameters", "Arguments0: " + str(args_dict), global_step=4)
 
-    main(args.data_dir, tuple(args.img_size), args.batch_size, args.batches_in_episode, args.n_epochs,
-         args.lr_discriminator, args.weight_decay, args.device_discriminator, args.retrain_disc, args.lr_generator,
-         args.total_steps, args.device_generator, args.blender_add, args.blend_file)
+    main(args.data_dir, tuple(args.img_size), args.batch_size, args.batches_in_episode, args.loss_weight,
+         args.n_epochs, args.lr_discriminator, args.weight_decay, args.device_discriminator, args.retrain_disc,
+         args.lr_generator, args.total_steps, args.device_generator, args.blender_add, args.blend_file)
