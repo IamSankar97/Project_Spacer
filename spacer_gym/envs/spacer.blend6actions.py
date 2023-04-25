@@ -1,6 +1,8 @@
 # # Use below only during debugging
 # import pydevd_pycharm
 # pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
+# *******************The code name is 6 actions but 5
+# action is used with the black musgrave texture with white back ground****
 
 import sys
 import os
@@ -54,19 +56,19 @@ class SpacerEnv(btb.env.BaseEnv):
 
         self.y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
                          18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
+        #   (1)
+        self.action_Material = {'roughness': [0, 0.5]}
+        #   (1)
+        self.action_mix = {'Factor': [0.0, 0.3]} #{'Factor': [0.0, 0.4]} old noise material3
+
+        # self.action_light_cmn = {"value": [0.8, 1]}
         #   (3)
-        self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
-        #   (1)
-        self.action_mix = {'Factor': [0.0, 0.1]} #{'Factor': [0.0, 0.4]} old noise material3
-        #   (1)
-        self.action_light_cmn = {"value": [0.8, 1]}
-        #   (1)
-        self.action_light = {'energy0': [0.01, 0.02]}
-        # Total = 6
+        self.action_light = {'energy0': [0.02, 0.18], 'ro_x': [-0.42, 0.42], 'ro_y': [-0.42, 0.42]}
+        # Total = 5
 
         self.reset_action = {'specular': 0.2, 'ior': 2.3, 'roughness': 0.1, 'factor': 0.05, "value": 0.8,
-                             'energy0': 0.01, 'ro_z': 0}
-        self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light_cmn, **self.action_light}
+                             'energy0': 0.01, 'ro_x': 0, 'ro_y': 0}
+        self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light}
         self.action_keys = list(self.action_bound.keys())
         self.update_scene()
         time.sleep(5)
@@ -158,9 +160,9 @@ class SpacerEnv(btb.env.BaseEnv):
         clipped_action = {key: np.clip(action[i], self.action_bound[key][0],
                                        self.action_bound[key][1]) for i, key in enumerate(self.action_bound.keys())}
         self.reset_action = clipped_action
-        self.update_mat(self.reset_action['specular'], self.reset_action['ior'], self.reset_action['roughness'])
+        self.update_mat(0.5, 2.3, self.reset_action['roughness'])
         self.update_Mix(self.reset_action['Factor'])
-        self.update_lights(self.reset_action['value'], self.reset_action['energy0'])
+        self.update_lights(self.reset_action['energy0'], self.reset_action['ro_x'], self.reset_action['ro_y'])
 
         # spacer = self.reset_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
@@ -206,17 +208,18 @@ class SpacerEnv(btb.env.BaseEnv):
     def take_action(self, actions):
         self.action_pair = dict(zip(self.action_keys, actions))
         action_inverse_mat = self.inverse_normalization(self.action_Material)
-        self.update_mat(action_inverse_mat['specular'], action_inverse_mat['ior'], action_inverse_mat['roughness'])
+        # self.update_mat(action_inverse_mat['specular'], action_inverse_mat['ior'], action_inverse_mat['roughness'])
+        self.update_mat(0.5, 2.3, action_inverse_mat['roughness'])
 
         action_inverse_mix = self.inverse_normalization(self.action_mix)
         self.update_Mix(action_inverse_mix['Factor'])
 
-        actions_inverse_cmn_ligt = self.inverse_normalization(self.action_light_cmn)
-        actions_inverse_specifice_ligt = self.inverse_normalization(self.action_light)
-        self.update_lights(actions_inverse_cmn_ligt['value'], actions_inverse_specifice_ligt['energy0'])
+        # actions_inverse_cmn_ligt = self.inverse_normalization(self.action_light_cmn)
+        actions_inverse_specific_ligt = self.inverse_normalization(self.action_light)
+        self.update_lights(actions_inverse_specific_ligt['energy0'], actions_inverse_specific_ligt['ro_x'],
+                           actions_inverse_specific_ligt['ro_y'])
 
-        self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_cmn_ligt,
-                                **actions_inverse_specifice_ligt}
+        self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_specific_ligt}
 
         self.action_inverted = {key: round(value, 2) for key, value in self.action_inverted.items()}
 
@@ -247,21 +250,21 @@ class SpacerEnv(btb.env.BaseEnv):
         texture_node = self.texture_nodes['Mix (Legacy)']
         texture_node.inputs['Fac'].default_value = factor
 
-    def update_lights(self, value, energy0):
+    def update_lights(self, energy0, ro_x, ro_y):
         #   set color
-        existing_rgb = self.light0.color[:3]
-        h, s, v = colorsys.rgb_to_hsv(*existing_rgb)
-        hsv_color = (h, s, value)
-        rgb_color = colorsys.hsv_to_rgb(*hsv_color)
-        dummy_alpha = tuple([1.0])
-        self.light0.color = rgb_color + dummy_alpha
+        # existing_rgb = self.light0.color[:3]
+        # h, s, v = colorsys.rgb_to_hsv(*existing_rgb)
+        # hsv_color = (h, s, value)
+        # rgb_color = colorsys.hsv_to_rgb(*hsv_color)
+        # dummy_alpha = tuple([1.0])
+        # self.light0.color = rgb_color + dummy_alpha
         #   set energy
         self.light0.data.energy = energy0
         # Exclude for 6 actions
         # self.light0.data.spread = Spread
         # #   set light angle
-        # self.light0.rotation_euler.x = ro_x
-        # self.light0.rotation_euler.y = ro_y
+        self.light0.rotation_euler.x = ro_x
+        self.light0.rotation_euler.y = ro_y
 
     def update_clr_ramp(self, Pos_black, Pos_white):
         color_ramp_node = self.texture_nodes['ColorRamp']
