@@ -18,7 +18,7 @@ from blendtorch import btb
 from spacer import Spacer
 import datetime
 from img_processing import remove_back_ground
-from utils import augument, get_circular_corps, get_no_defect_crops
+from utils import augument, get_no_defect_crops
 
 sys.path.append(os.getcwd())
 sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
@@ -41,7 +41,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.img_addr = 'spacer_gym/spacer_env_render/image_spacer.png'
         # Note, ensure that physics run at same speed.
         self.fps = bpy.context.scene.render.fps
-        self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
         self.avg_pixel = 30
         self.np_random = None
         self.state = 40
@@ -94,7 +93,6 @@ class SpacerEnv(btb.env.BaseEnv):
         # Get a BMesh representation
         bm = bmesh.new()  # create an empty BMesh
         bm.from_mesh(self.spacer.data)  # fill it in from a Mesh
-        self.vertices = list(new_realisation)
         for vertice_old, vertice_new in zip(bm.verts, self.vertices):
             if vertice_old.co.z != 1:
                 vertice_old.co.z = vertice_new[2]
@@ -102,28 +100,6 @@ class SpacerEnv(btb.env.BaseEnv):
         bm.to_mesh(self.spacer.data)  # Finish up, write the bmesh back to the mesh
         bm.free()
         self.update_scene()  # Updates the mesh in scene by refreshing the screen
-
-    def get_sample_surface(self, with_defect=True):
-        filename = random.choice(self.topologies)
-        if filename.endswith('.pkl'):
-            with open(os.path.join(self.topology_dir, filename), 'rb') as f:
-                my_realisation = pickle.load(f) * 1e-6
-                grid_spacing, sample_surface = my_realisation[0][0], np.array(my_realisation[1:, :])
-
-                spacer = Spacer(sample_surface, grid_spacing)
-                if with_defect:
-                    ro, r1, theta0, defect_length, defect_type = \
-                        np.round(np.random.uniform(12.5, 15), 2), \
-                            np.round(np.random.uniform(13.8, 16), 2), \
-                            np.random.randint(1, 85), \
-                            np.round(np.random.uniform(0.1, 10), 2), \
-                            random.choice([0, 1])
-                    spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
-                # spacer.randomize_defect(ro, r1, np.random.randint(92, 179), 70, 40, defect_length, 0)
-                # spacer.randomize_defect(ro, r1, np.random.randint(180, 240), 70, 40, defect_length, 0)
-                # spacer.randomize_defect(ro, r1, np.random.randint(240, 360), 70, 40, defect_length, 0)
-                f.close()
-                return spacer
 
     def reset_sample_surface(self, with_defect=True):
         filename = 'points_6_dx22.182_0.pkl'  # points_5_dx18.485_0.pkl'
@@ -186,29 +162,11 @@ class SpacerEnv(btb.env.BaseEnv):
 
         self.update_clr_ramp(self.reset_action['Pos_black'], self.reset_action['Pos_white'])
 
-        # spacer = self.reset_sample_surface(with_defect=False)
-        # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
+        spacer = self.reset_sample_surface(with_defect=False)
+        self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
         self.update_scene()
         self.total_step += 1
         return self._env_post_step()
-
-    # def _env_post_step(self):
-    #
-    #     # Setup default image rendering
-    #     global r_
-    #     cam = btb.Camera()
-    #     off = btb.OffScreenRenderer(camera=cam, mode='rgb')
-    #     file_path = 'spacer_gym/temp{}/image{}_{}.png'.format(self.g_time_stamp, self.episodes, self.step)
-    #
-    #     pil_img = off.render(file_path)
-    #     gray_img = np.array(pil_img, dtype=np.uint8)
-    #     blur_img = cv2.GaussianBlur(gray_img, (3, 3), 0)
-    #     ret, binary_img = cv2.threshold(blur_img, 30, 255, cv2.THRESH_BINARY)
-    #     RM_BG_img = cv2.bitwise_and(gray_img, gray_img, mask=binary_img)
-    #     self.state = Image.fromarray(RM_BG_img)
-    #     done, r_ = False, 1
-    #
-    #     return dict(obs=self.state, reward=r_, done=done)
 
     def _env_post_step(self):
 
@@ -283,7 +241,7 @@ class SpacerEnv(btb.env.BaseEnv):
 
     def update_mapping(self):
         texture_node = self.texture_nodes['Mapping']
-        randomize = np.random.random_sample(3,)
+        randomize = np.random.random_sample(3, )
         texture_node.inputs['Rotation'].default_value = randomize
 
     def update_Mix(self, factor):
@@ -312,9 +270,6 @@ class SpacerEnv(btb.env.BaseEnv):
         color_ramp.elements[1].position = Pos_white
 
     def update_spacer_orientation(self):
-        # self.spacer.location.x = np.random.uniform(-0.0003, 0.0003)
-        # self.spacer.location.y = np.random.uniform(-0.0003, 0.0003)
-        # self.spacer.location.z = np.random.uniform(-0.0003, 0.0003)
         self.spacer.rotation_euler.z = np.random.uniform(0, 3.14)
 
 

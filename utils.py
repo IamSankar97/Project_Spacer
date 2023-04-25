@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from PIL import Image, ImageFilter
 import itertools
 import random
+from skimage.util import view_as_windows
 
 
 def get_theta(r1, r2, theta0, distance):
@@ -22,7 +23,7 @@ def get_theta(r1, r2, theta0, distance):
         m = 1
     elif m < -1:
         m = -1
-    theta1 = np.arccos(m) + np.radians(theta0)
+    theta1 = (np.arccos(m)) + np.radians(theta0)
     return theta1
 
 
@@ -177,18 +178,16 @@ def get_slid_window(image, win_size=(64, 64), step_size=32):
 
 
 def get_no_defect_crops(image, win_size=(64, 64), step_size=32, thresh_old=1, count=30):
-    # Initialize empty list to store resultant windows
-    result_windows = []
-
-    # Iterate over image with sliding window
-    for y in range(0, image.shape[0], step_size):
-        for x in range(0, image.shape[1], step_size):
-            # Crop out window
-            window = image[y:y + win_size[1], x:x + win_size[0]]
-            # 30  is no of pixels meeting threshold
-            if np.sum(window <= thresh_old) < count:
-                result_windows.append(window)
-    return np.array(result_windows)
+    # Generate windows using view_as_windows
+    windows = view_as_windows(image, win_size, step=step_size)
+    # Flatten windows and count number of pixels below threshold
+    counts = np.sum(windows <= thresh_old, axis=(2, 3))
+    # Find indices where number of pixels below threshold is less than count
+    y, x = np.where(counts < count)
+    # Extract windows with desired indices
+    result_windows = windows[y, x]
+    # Reshape windows to 2D and return
+    return result_windows.reshape(len(result_windows), *win_size)
 
 
 def get_orth_actions(no_of_actions, action_range=(-1, 1)):
@@ -234,7 +233,7 @@ def center_ring(actual_spacer):
     return centered_ring
 
 
-def is_loss_stagnated_or_increasing(loss_list, window_size=100, threshold=1e-4):
+def is_loss_stagnated(loss_list, window_size=100, threshold=1e-4):
     """
     Check if the loss is stagnant or increasing by taking the last `window_size` entries of the `loss_list`.
     Returns True if the standard deviation of the last `window_size` entries is below `threshold`,
@@ -247,7 +246,7 @@ def is_loss_stagnated_or_increasing(loss_list, window_size=100, threshold=1e-4):
     last_losses = loss_list[-window_size:]
     std_dev = np.std(last_losses)
     # min_loss = min(last_losses)
-    if std_dev < threshold: #or loss_list[-1] >= min_loss
+    if std_dev < threshold:  # or loss_list[-1] >= min_loss
         return True
     else:
         return False
