@@ -8,6 +8,8 @@ import os
 import sys
 import random
 from collections import OrderedDict
+
+from skimage.util import view_as_windows
 from stable_baselines3 import PPO
 import pandas as pd
 
@@ -84,6 +86,18 @@ def get_attribute_dict(*args):
     return attr_dict
 
 
+x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
+            28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
+y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
+            18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
+
+
+def sliding_window(image, size, stride):
+    windows = view_as_windows(image, size, step=stride)
+    result_windows = windows[y_128_64, x_128_64]
+    return result_windows
+
+
 def log_to_file(log_info, log_file):
     with open(log_file, 'a', newline='') as csvfile2:
         writer = csv.DictWriter(csvfile2, fieldnames=list(log_info.keys()))
@@ -115,7 +129,8 @@ class TrainAndLoggingCallback(BaseCallback):
             self.logger.record('GAN_loss/ep_gen_loss', np.mean(self.training_env.get_attr('generator_loss_mean')))
             self.logger.record('GAN_loss/ep_l1_loss', np.mean(self.training_env.get_attr('l1_loss_mean')))
             self.logger.record('GAN_loss/generator_acc_mean', np.mean(self.training_env.get_attr('generator_acc_mean')))
-            self.logger.record('GAN_loss/avg_brightness_mean', np.mean(self.training_env.get_attr('avg_brightness_mean')))
+            self.logger.record('GAN_loss/avg_brightness_mean',
+                               np.mean(self.training_env.get_attr('avg_brightness_mean')))
 
             return True
 
@@ -191,7 +206,8 @@ class CustomDataset(torch.utils.data.Dataset):
 
 
 class Penv(gym.Env):
-    def __init__(self, img_size, batch_size, episode_length, loss_weight, dat_dir, discriminator, lr_discriminator, weight_decay,
+    def __init__(self, img_size, batch_size, episode_length, loss_weight, dat_dir, discriminator, lr_discriminator,
+                 weight_decay,
                  device_discriminator, train_discriminator, blender_add, blend_file):
         super(Penv, self).__init__()
         self.loss_weight = loss_weight
@@ -216,7 +232,7 @@ class Penv(gym.Env):
         self.environments.reset()
         self.action_paired = {}
         # logging must be after environment generation
-        self.action_space = spaces.Box(-1, 1, shape=(6,))
+        self.action_space = spaces.Box(-1, 1, shape=(5,))
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.actual_dataloader = self.get_image_dataloader()
         # derived by calculating avg value over all the available fake images of shape 64*64
@@ -310,18 +326,30 @@ class Penv(gym.Env):
             transforms.Grayscale(num_output_channels=1),  # Convert to grayscale
             transforms.RandomHorizontalFlip(),  # Randomly flip images left-right
             transforms.RandomVerticalFlip(),
-            transforms.ToTensor(),  # Convert to tensor
         ])
 
         # Create the dataset
         dataset = ImageFolder(root=self.spacer_data_dir, transform=transform)
 
         # Create the dataloader
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.no_img_obs, shuffle=shuffle)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=shuffle)
+
+        # Define a new collate_fn to perform sliding window on the batch
+        def sliding_window_collate_fn(batch):
+            images, labels = zip(*batch)
+            patches = []
+            for image in images:
+                image = np.asarray(image)
+                patches.append(sliding_window(image, size=128, stride=64))
+            patches = torch.from_numpy(patches[0]).unsqueeze(1).float()
+            labels = torch.tensor(labels).repeat_interleave(patches.size(0) // len(labels))
+            return patches, labels
+
+        dataloader.collate_fn = sliding_window_collate_fn
 
         # Move the dataloader to the specified device
         if device is not None:
-            dataloader = dataloader.to(self.disc_device)
+            dataloader = dataloader.to(device)
 
         return dataloader
 
@@ -448,7 +476,7 @@ class Penv(gym.Env):
 
         #   Check if the action has failed
         #   Calculate loss that is l1_loss and cross_entropy
-        fake_spacer = fake_spacer / 255
+        actual_spacer, fake_spacer = actual_spacer / 255, fake_spacer / 255
         actual_spacer, fake_spacer = to_device(actual_spacer, device), to_device(torch.from_numpy(fake_spacer.copy())
                                                                                  .unsqueeze(1).float(), device)
 
@@ -465,7 +493,7 @@ class Penv(gym.Env):
         self.generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
 
         #   Calculate Reward
-        self.reward = -self.cross_entropy - self.loss_weight*(100 * self.l1_loss)
+        self.reward = -self.cross_entropy - self.loss_weight * (100 * self.l1_loss)
 
         self.generator_acc_mean.append(self.generator_acc)
         self.generator_loss_mean.append(self.cross_entropy)
@@ -558,11 +586,12 @@ class Penv(gym.Env):
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, default='/home/mohanty/PycharmProjects/Data/data_128/train/good/',
-                        help='Cropped spacer images for discriminator training')
+    parser.add_argument('--data_dir', type=str,
+                        default='/home/mohanty/PycharmProjects/Data/spacer_data/train_centered_parent',
+                        help='Full spacer images for discriminator training')
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
-    parser.add_argument('--batch_size', type=int, default=6, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=168, help='Episode length = batch_size * '
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=100, help='Episode length = batch_size * '
                                                                             'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
@@ -572,18 +601,17 @@ def parse_arguments():
     parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
     parser.add_argument('--retrain_disc', type=bool, default=False, help='Discriminator device')
 
-    parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
+    parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=5, help='Blendtorch launcher address')
-    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action.blend',
+    parser.add_argument('--blender_add', type=int, default=50, help='Blendtorch launcher address')
+    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
 
 
 def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epochs, lr_discriminator, weight_decay,
          device_discriminator, retrain_disc, lr_generator, total_steps, device_generator, blender_add, blend_file):
-    batch_size = batch_size
     # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
     episode_length = batch_size * batches_in_episode
 
@@ -593,8 +621,8 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
                 '02:14:14/PPO_model/Resnet_disc_model_pretrain_4.pth'
     discriminator = torch.load(disc_file)
     discriminator = to_device(discriminator, device_0)
-    writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=5)
-    writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=5)
+    writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=6)
+    writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=6)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
 
     py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length,
@@ -636,6 +664,8 @@ if __name__ == '__main__':
     args = parse_arguments()
     args_dict = vars(args)
     writer.add_text("hyper_parameters", "Arguments0: " + str(args_dict), global_step=4)
+    writer.add_text("experiment_direction", "As black images tend to give more accuracy, new material definition is"
+                                            " created, that allows black patches over a white surface", global_step=5)
 
     main(args.data_dir, tuple(args.img_size), args.batch_size, args.batches_in_episode, args.loss_weight,
          args.n_epochs, args.lr_discriminator, args.weight_decay, args.device_discriminator, args.retrain_disc,
