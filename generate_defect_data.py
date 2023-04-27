@@ -36,7 +36,7 @@ import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.tensorboard import SummaryWriter
 
-seed_ = 0
+seed_ = 54
 
 torch.manual_seed(seed_)
 random.seed(seed_)
@@ -590,8 +590,8 @@ def parse_arguments():
                         default='/home/mohanty/PycharmProjects/Data/spacer_data/train_centered_parent',
                         help='Full spacer images for discriminator training')
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
-    parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
+    parser.add_argument('--batch_size', type=int, default=1000, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=5, help='Episode length = batch_size * '
                                                                           'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
@@ -604,7 +604,7 @@ def parse_arguments():
     parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=55, help='Blendtorch launcher address')
+    parser.add_argument('--blender_add', type=int, default=15, help='Blendtorch launcher address')
     parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2-only_mat.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
@@ -646,15 +646,16 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
 
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
-    model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=lr_generator,
-                batch_size=batch_size, n_steps=episode_length, n_epochs=n_epochs, clip_range=.1, gamma=.95,
-                gae_lambda=.9, policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
+    # model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=lr_generator,
+    #             batch_size=batch_size, n_steps=episode_length, n_epochs=n_epochs, clip_range=.1, gamma=.95,
+    #             gae_lambda=.9, policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
     #
     # model.set_logger(new_logger)
-    model.load('/home/mohanty/PycharmProjects/train_logs2/spacer2023-04-23 02:43:39/PPO_model/PPO_gen_model_1000.zip')
+    model = PPO.load('/home/mohanty/PycharmProjects/train_logs2/spacer2023-04-23 '
+                     '02:43:39/PPO_model/PPO_gen_model_35000.zip', env=py_env)
     obs = py_env.reset()
     #   Multi-processed RL Training
-    for i in range(1000):
+    for i in range(5000):
         action, _states = model.predict(obs)
         obs, rewards, dones, info = py_env.step(action)
 
