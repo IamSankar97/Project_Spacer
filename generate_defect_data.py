@@ -8,7 +8,7 @@ import os
 import sys
 import random
 from collections import OrderedDict
-
+from stable_baselines3.common.vec_env import DummyVecEnv
 from skimage.util import view_as_windows
 from stable_baselines3 import PPO
 import pandas as pd
@@ -229,7 +229,7 @@ class Penv(gym.Env):
         self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, blend_file=blend_file,
                                      real_time=False)
         logging.basicConfig(filename=train_log, level=logging.INFO)
-        self.environments.reset()
+        # self.environments.reset()
         self.action_paired = {}
         # logging must be after environment generation
         self.action_space = spaces.Box(-1, 1, shape=(5,))
@@ -309,7 +309,7 @@ class Penv(gym.Env):
         return fake_spacer, info
 
     def _get_obs_space(self, scalar=False):
-        fake_spacer, _ = self.get_fake_data(self.action_space.sample())
+        fake_spacer, _ = self.get_fake_data(self.action_space.sample(), reset=True)
         self.no_img_obs = len(fake_spacer)
         obs_space = {}
         for i in range(self.no_img_obs):
@@ -592,7 +592,7 @@ def parse_arguments():
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
     parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
-                                                                            'batches_in_episode')
+                                                                          'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
@@ -604,7 +604,7 @@ def parse_arguments():
     parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=51, help='Blendtorch launcher address')
+    parser.add_argument('--blender_add', type=int, default=55, help='Blendtorch launcher address')
     parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2-only_mat.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
@@ -626,9 +626,10 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
     print("batch_size:", batch_size, 'episode_length:', episode_length)
 
     py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length,
-                          loss_weight=loss_weight, dat_dir=data_dir, discriminator=discriminator,
-                          lr_discriminator=lr_discriminator, weight_decay=weight_decay, device_discriminator=device_0,
-                          train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file))
+                  loss_weight=loss_weight, dat_dir=data_dir, discriminator=discriminator,
+                  lr_discriminator=lr_discriminator, weight_decay=weight_decay, device_discriminator=device_0,
+                  train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file))
+    vec_env = DummyVecEnv([lambda: py_env] * 1)
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
     # env_checker.check_env(Py_env,  warn=True)
@@ -647,17 +648,15 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
 
     model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=lr_generator,
                 batch_size=batch_size, n_steps=episode_length, n_epochs=n_epochs, clip_range=.1, gamma=.95,
-                gae_lambda=.9,
-                policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
-
-    model.set_logger(new_logger)
-
+                gae_lambda=.9, policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
+    #
+    # model.set_logger(new_logger)
+    model.load('/home/mohanty/PycharmProjects/train_logs2/spacer2023-04-23 02:43:39/PPO_model/PPO_gen_model_1000.zip')
+    obs = py_env.reset()
     #   Multi-processed RL Training
-    model.learn(total_timesteps=total_steps, callback=logging_callback, log_interval=1, tb_log_name="first_run",
-                reset_num_timesteps=False)
-    model.save(FINAL_MODEL_DIR + '{}'.format(total_steps))
-    torch.save(discriminator, FINAL_MODEL_DIR + '{}'.format(total_steps) + 'resnet.pth')
-    writer.close()
+    for i in range(1000):
+        action, _states = model.predict(obs)
+        obs, rewards, dones, info = py_env.step(action)
 
 
 if __name__ == '__main__':

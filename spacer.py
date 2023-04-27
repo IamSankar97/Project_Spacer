@@ -1,12 +1,15 @@
+import random
 import time
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import warnings
-from utils import pol2cart, closest_number_, get_theta, closest_number_np
+from utils import pol2cart, get_theta
+import multiprocessing as mp
 
 
 class Spacer:
-    def __init__(self, surface: np.ndarray, grid_spacing: float, outer_radius=16, thickness=3.222, produce_defect = True):
+    def __init__(self, shared_matrix, grid_spacing: float, outer_radius=16 * 1e-3, thickness=3.222 * 1e-3, produce_defect=True):
         '''
         surface: Point_coordinates in a numpy array
         grid_spacing:
@@ -16,15 +19,36 @@ class Spacer:
 
         # originally, outer_radius = 16
         self.h_defect = None
-        self.surface = surface
         self.grid_spacing = grid_spacing
-        self.point_coo = pd.DataFrame()
+        self.grid_radius = outer_radius + self.grid_spacing
+        self.grid_dim = int(self.grid_radius / self.grid_spacing) * 2
+        self.surface = np.frombuffer(shared_matrix.get_obj(), dtype=np.float32, count=self.grid_dim**2)
+        self.surface = self.surface.reshape((self.grid_dim, self.grid_dim))
+        # self.surface = np.zeros([self.grid_dim, self.grid_dim])
+        self.point_coo = None
         self.vertices = None
         self.spacer_coo = pd.DataFrame()
-        self.outer_r = (outer_radius * 1e-3) + self.grid_spacing
-        self.inner_r = self.outer_r - (thickness * 1e-3) - self.grid_spacing
-        self.produce_defect = produce_defect
-        self.get_spacer_point_co()
+        self.outer_r = outer_radius + self.grid_spacing
+        self.inner_r = self.outer_r - thickness - self.grid_spacing
+        # self.produce_defect = produce_defect
+        self.get_spacer()
+
+    def get_spacer(self):
+        end_l, end_r = int(-self.surface.shape[0] / 2), int(self.surface.shape[0] / 2)
+        X = np.linspace(end_l * self.grid_spacing, end_r * self.grid_spacing, num=self.surface.shape[0])
+        Y = X
+        self.Xmesh, self.Ymesh = np.meshgrid(X, Y)
+
+        x_center, y_center = 0, 0
+
+        # Calculate the distance of each point in the mesh grid from the center of the circle
+        distance = np.sqrt((self.Xmesh - x_center) ** 2 + (self.Ymesh - y_center) ** 2)
+
+        # Create a boolean mask for the circular annulus
+        mask = (distance > self.outer_r) | (distance < self.inner_r)
+
+        # Update the values of surface outside the circular annulus
+        self.surface[mask] = 1
 
     def get_point_co(self):
         """
@@ -63,193 +87,97 @@ class Spacer:
         -------
             Point Coordinates [X, Y, Z]
         """
+        # end_l, end_r = int(-self.surface.shape[0] / 2), int(self.surface.shape[0] / 2)
+        #
+        # X = np.array([i * self.grid_spacing for i in range(end_l, end_r)])
+        # Y = X
+        # self.Xmesh, self.Ymesh = np.meshgrid(X, Y)
+        #
+        # x_center, y_center = 0, 0
+        #
+        # # Calculate the distance of each point in the mesh grid from the center of the circle
+        # distance = np.sqrt((self.Xmesh - x_center) ** 2 + (self.Ymesh - y_center) ** 2)
+        #
+        # # Create a boolean mask for the circular annulus
+        # mask = (distance > self.outer_r) | (distance < self.inner_r)
+        #
+        # # Update the values of surface outside the circular annulus
+        # self.surface[mask] = 1
 
-        end_l, end_r = int(-self.surface.shape[0] / 2), int(self.surface.shape[0] / 2)
+        point_coords = np.column_stack((self.Xmesh.ravel(), self.Ymesh.ravel(), self.surface.ravel()))
 
-        X = np.array([i * self.grid_spacing for i in range(end_l, end_r)])
-        Y = X
-        Xmesh, Ymesh = np.meshgrid(X, Y)
+        self.point_coo = point_coords[np.lexsort((point_coords[:, 1], point_coords[:, 0]))]
 
-        def update_z(x, y, h):
-            """
-            Parameters
-            ----------
-            x : Position of grid at x
-            y : Position of grid at y
-            h : Height at that grid point
+    def generate_defect(self, theta0, alpha=40, beta=70):
 
-            Returns
-            -------
-                if grid_point falls between spacer Outer_radius and Inner_radius retains height else updates height to 1
-                This 1 will later be used in blender script to avoid these vertices getting created
-            """
-            r = np.sqrt(x ** 2 + y ** 2)
-            if self.outer_r > r > self.inner_r:
-                return x, y, h
-            else:
-                return x, y, 1
-
-        point_coords = np.array(
-            [update_z(x, y, z) for x_, y_, z_ in zip(Xmesh, Ymesh, self.surface)
-             for x, y, z in zip(x_, y_, z_)])
-
-        df_point_coords = pd.DataFrame(point_coords, dtype=np.float64)  # Saves 10 mili seconds
-        df_point_coords.rename(columns={0: 'X', 1: 'Y', 2: 'Z'}, inplace=True)
-        df_point_coords.sort_values(by=['X', 'Y'], inplace=True)
-        df_point_coords['X_grid'] = df_point_coords['X'].div(self.grid_spacing).round().astype(int)
-        df_point_coords['Y_grid'] = df_point_coords['Y'].div(self.grid_spacing).round().astype(int)
-        self.point_coo = df_point_coords
-
-    def update_defect_height(self, row):
-        """
-
-        Parameters
-        ----------
-        row: point coordinate where defect has to be created
-
-        Returns
-        -------
-        point coordinate by updating itz z value t0 defect
-        """
-        global independent, dependent_actual, index
-        # df = self.point_coo
-        # df['X_grid'] = df['X'].div(self.grid_spacing).round().astype(int)
-        # df['Y_grid'] = df['Y'].div(self.grid_spacing).round().astype(int)
-
-        index_defect = []
-        for i in range(row['no_of_grids']):
-            independent = row[row['discretize'] + '0'] + (i * self.grid_spacing)
-            if row['discretize'] == 'X':
-                # Calculating Y knowing Independent/parent grid X
-                dependent = (abs(independent - row[row['discretize'] + '0']) * row['slope']) + row[
-                    row['find_coo'] + '0']
-            else:
-                # Calculating X knowing Independent/parent grid Y
-                dependent = (abs(independent - row[row['discretize'] + '0']) / row['slope']) + row[
-                    row['find_coo'] + '0']
-            independent_grid = np.round_(independent / self.grid_spacing)
-            df_ = self.point_coo[self.point_coo.loc[:, row['discretize'] + '_grid'] == independent_grid]
-
-            if not df_.empty:
-                dependent_actual, index = closest_number_np(df_, dependent, row['find_coo'])
-
-                if self.point_coo.at[index, "Z"] != 1:
-                    self.point_coo.at[index, "Z"] -= self.h_defect #Defect height mapping
-                    index_defect.append(index)
-
-        # 1st return X 2nd Return Y
-        if row['discretize'] == 'X':
-            return independent, dependent_actual
-        else:
-            return dependent_actual, independent
-
-    def generate_defect(self, r0, r1, theta0_set: np.ndarray = np.array(np.NaN), origin_cord: np.ndarray = np.array(np.NaN),
-                        alpha=0.0, beta=0.0, scratch_length: float = 0.0, return_def_end_co: bool = False):
-        """
-        Note:
-            It takes starting point of defect (r0, theta0), end point of defect r1 (calculates theta2) and defect length to prescribe
-            the defect location
-
-        :param r0: starting radius of defect in mm
-        :param r1: end radius of defect in mm
-        :param theta0_set: starting angles of defect in degree
-        :param alpha: defect geometry
-        :param beta: defect geometry
-        :param origin_cord: origin of the defect in cartesian form (Not to be mentioned if origin is known in polar coo)
-        :param return_def_end_co: Returns the end defect coordinate in cartesian form
-        :param scratch_length: length of the scratch in mm
-        :return: Generates defect in the spacer
-
-        """
-        if self.point_coo.empty:
-            self.get_spacer_point_co()
+        r0 = np.round(np.random.uniform(self.inner_r, self.outer_r), 2)
+        r1 = np.round(np.random.uniform(self.inner_r, self.outer_r), 2)
+        scratch_length = np.round(np.random.uniform(0.1, 10), 2)
 
         # Convert to meter
-        r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
+        r0, r1, scratch_length = r0, r1, scratch_length * 1e-3
         if scratch_length < abs(r0 - r1):
-            r1 = r0+scratch_length
-            warnings.warn("defect length is smaller than asked radius boundary, r1 is adjusted to meet the scratch_length")
+            r1 = r0 + scratch_length
+            warnings.warn(
+                "defect length is smaller than asked radius boundary, r1 is adjusted to meet the scratch_length")
 
         #   Defect grove height and depth from mean surface
         h_up, h_total = self.grid_spacing / np.tan(np.radians(alpha)), \
                         self.grid_spacing / np.tan(np.radians(beta))
         self.h_defect = h_total - h_up
 
-        #   Calculating start and end coordinate of defect
-        if not np.isnan(theta0_set).any():
-            defect_geometry = pd.DataFrame([[pol2cart(r0, np.radians(theta0)),
-                                             pol2cart(r1, get_theta(r0, r1, theta0, scratch_length)),
-                                             get_theta(r0, r1, theta0, scratch_length)]
-                                            for theta0 in theta0_set])
-        else:
-            defect_geometry = \
-                pd.DataFrame([[(xo, yo),
-                               pol2cart(r1, get_theta(np.sqrt(xo**2 + yo**2), r1, np.arctan2(yo, xo), scratch_length)),
-                               get_theta(np.sqrt(xo**2 + yo**2), r1, np.arctan2(yo, xo), scratch_length)]
-                              for xo, yo in origin_cord])
+        #   Calculating start and end coordinate of defects in terms of grid points
+        x0, y0 = pol2cart(r0, np.radians(theta0))
+        x1, y1 = pol2cart(r1, get_theta(r0, r1, theta0, scratch_length))
 
-        def get_slope(row):
-            rise, run = abs(row['Y1'] - row['Y0']), abs(row['X1'] - row['X0'])
-            if rise > scratch_length:
-                run = rise
-            slope = rise / run
-            if rise > run:
-                no_of_grids = int(np.round_(rise / self.grid_spacing) + 1)
-                discrete, find_coo = 'Y', 'X'
-            else:
-                no_of_grids = int(np.round_(run / self.grid_spacing) + 1)
-                discrete, find_coo = 'X', 'Y'
+        # convert coordinates in meters to grid points
+        def_co = np.array([x0, y0, x1, y1]) / self.grid_spacing
+        def_co += self.surface.shape[0] * 0.5
+        def_co = def_co.astype(int)
+        x0, y0, x1, y1 = def_co
 
-            return slope, rise, run, no_of_grids, discrete, find_coo
+        # Calculate the distances and angles between start and end points
+        dx, dy = x1 - x0, y1 - y0
+        distance = np.sqrt(dx ** 2 + dy ** 2)
+        angle = np.arctan2(dy, dx)
+        sin_angle, cos_angle = np.sin(angle), np.cos(angle)
 
-        #   Generates a Dataframe listing start and end coordinates of the defects.
-        defect_geometry[['X0', 'Y0']] = pd.DataFrame(defect_geometry[0].tolist(), index=defect_geometry.index)
-        defect_geometry[['X1', 'Y1']] = pd.DataFrame(defect_geometry[1].tolist(), index=defect_geometry.index)
-        defect_geometry.rename(columns={2: 'theta1'}, inplace=True)
-        defect_geometry.drop(defect_geometry.columns[0:2], axis=1, inplace=True)
-        defect_geometry['result'] = defect_geometry[['X0', 'Y0', 'X1', 'Y1']].apply(get_slope, axis=1)
-        defect_geometry[['slope', 'rise', 'run', 'no_of_grids', 'discretize', 'find_coo']] \
-            = pd.DataFrame(defect_geometry['result'].tolist(), index=defect_geometry.index)
+        # Calculate the number of grid points along the line
+        num_points = int(distance / self.grid_spacing)
+        x_points, y_points = np.full(num_points, x0), np.full(num_points, y0)
 
-        defect_geometry.drop(['result'], axis=1, inplace=True)
+        indices = np.arange(num_points)
+        x_coords = x_points + (indices * self.grid_spacing * cos_angle)
+        y_coords = y_points + (indices * self.grid_spacing * sin_angle)
 
-        defect_end_co = []
-        for index, row in defect_geometry.iterrows():
-            defect_end_co.append(self.update_defect_height(row))
+        x_coords, y_coords = np.array(np.round(x_coords).astype(int)), np.array(np.round(y_coords).astype(int))
+        mask = (x_coords < self.surface.shape[0]) & (y_coords < self.surface.shape[1])
 
-        if return_def_end_co:
-            return np.array(defect_end_co)
+        # create a copy of the surface array and update only the values that need to be updated
+        # surface = np.zeros_like(self.surface)
+        self.surface[x_coords[mask], y_coords[mask]] = self.h_defect
 
-    def randomize_defect(self, r0, r1, theta0, alpha=0.0,
-                         beta=0.0, scratch_length: float = 0.0, defect_type: int = 0):
-        """
-        0: cluster straight_line defect
-        1. cluster not straight line defect
-        2. cluster straight_line and not straight line  #    Not implemented
-        Returns
-        -------
-        Topology with defect
-        """
-        # Change size = np.random.randint(1, 3) to adjust number of defect to not do clustering
-        # Cluster defects
-        number_of_defects = np.random.choice(np.arange(3, 10, 2), size=np.random.randint(1, 2), replace=False)
-        theta_set = number_of_defects + theta0
+    def update_matrix(self, value):
+        index = random.randint(0, self.surface.size - 1)
+        row = index // self.grid_dim
+        col = index % self.grid_dim
+        self.surface[row][col] = value
 
-        # Straight line defect
-        if defect_type == 0:
-            self.generate_defect(r0=r0, r1=r1, theta0_set=theta_set, alpha=alpha,
-                                 beta=beta, scratch_length=scratch_length)
+    def generate_defects_parallel(self, thetas, num_processes):
+        thetas_split = np.array_split(thetas, num_processes)
+        pool = mp.Pool(num_processes)
+        results = pool.map(self._generate_defects_worker, thetas_split)
+        pool.close()
+        pool.join()
+        for result in results:
+            print(np.min(self.surface))
+            plt.imshow(result, cmap='gray')
+            plt.plot()
+            self.surface += result
 
-        # Straight line defect
-        elif defect_type == 1:
-            split_region = np.random.uniform(0.1, 0.7)
-            r2 = r1
-            r1, scratch_length1 = r0 + ((r2 - r0) * split_region), scratch_length * split_region
-            scratch_length2 = scratch_length
-
-            origin_co_set = self.generate_defect(r0=r0, r1=r1, theta0_set=theta_set,
-                                                 alpha=alpha, beta=beta, scratch_length=scratch_length1,
-                                                 return_def_end_co=True)
-
-            self.generate_defect(r0=r1, r1=r2, alpha=alpha, beta=beta, scratch_length=scratch_length2,
-                                 origin_cord=origin_co_set)
+    def _generate_defects_worker(self, thetas):
+        result = np.zeros_like(self.surface)
+        for theta in thetas:
+            defect = self.generate_defect(theta)
+            result = defect
+        return result
