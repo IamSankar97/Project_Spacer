@@ -625,10 +625,10 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
     writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=6)
     print("batch_size:", batch_size, 'episode_length:', episode_length)
 
-    py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length,
+    py_env = Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length,
                   loss_weight=loss_weight, dat_dir=data_dir, discriminator=discriminator,
                   lr_discriminator=lr_discriminator, weight_decay=weight_decay, device_discriminator=device_0,
-                  train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file))
+                  train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file)
     vec_env = DummyVecEnv([lambda: py_env] * 1)
     # obs = Py_env.reset()
     # sample_obs = Py_env.observation_space.sample()
@@ -652,12 +652,13 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
     #
     # model.set_logger(new_logger)
     model = PPO.load('/home/mohanty/PycharmProjects/train_logs2/spacer2023-04-23 '
-                     '02:43:39/PPO_model/PPO_gen_model_35000.zip', env=py_env)
+                     '02:43:39/PPO_model/PPO_gen_model_20000.zip', env=py_env)
     obs = py_env.reset()
     #   Multi-processed RL Training
     for i in range(5000):
         action, _states = model.predict(obs)
         obs, rewards, dones, info = py_env.step(action)
+        print("accuracy", py_env.generator_acc, 'rewards', rewards)
 
 
 if __name__ == '__main__':

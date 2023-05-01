@@ -87,23 +87,6 @@ class Spacer:
         -------
             Point Coordinates [X, Y, Z]
         """
-        # end_l, end_r = int(-self.surface.shape[0] / 2), int(self.surface.shape[0] / 2)
-        #
-        # X = np.array([i * self.grid_spacing for i in range(end_l, end_r)])
-        # Y = X
-        # self.Xmesh, self.Ymesh = np.meshgrid(X, Y)
-        #
-        # x_center, y_center = 0, 0
-        #
-        # # Calculate the distance of each point in the mesh grid from the center of the circle
-        # distance = np.sqrt((self.Xmesh - x_center) ** 2 + (self.Ymesh - y_center) ** 2)
-        #
-        # # Create a boolean mask for the circular annulus
-        # mask = (distance > self.outer_r) | (distance < self.inner_r)
-        #
-        # # Update the values of surface outside the circular annulus
-        # self.surface[mask] = 1
-
         point_coords = np.column_stack((self.Xmesh.ravel(), self.Ymesh.ravel(), self.surface.ravel()))
 
         self.point_coo = point_coords[np.lexsort((point_coords[:, 1], point_coords[:, 0]))]

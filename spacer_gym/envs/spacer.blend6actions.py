@@ -84,7 +84,7 @@ class SpacerEnv(btb.env.BaseEnv):
         super().__init__(agent)
         self.action_inverted = None
         self.action_pair = None
-        self.grid_spacing = 0.000018  # 1e-6
+        self.grid_spacing = 0.00001  # 1e-6
         self.camera = bpy.data.objects["Camera"]
         self.camera.location = (0.0, 0.0, 0.15)
         self.light0 = bpy.data.objects["L0_top"]
@@ -200,13 +200,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.def_spacer.active_material = self.material
 
     def get_defect_mask(self, def_mesh_name: str = 'spacer_defect'):
-        # polygons_def = []
-        # for i in range(1, len(self.vertices) - self.xSize):
-        #     poly_set = self.vertices[np.array([i, i - 1, i - 1 + self.xSize, i + self.xSize]), 2]
-        #     # collecting only the defect polygons
-        #     if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1) \
-        #             and np.any((-1 <= poly_set) & (poly_set <= -0.000000001)):
-        #         polygons_def.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
 
         # create an array of indices for each polygon
         indices = np.arange(1, len(self.vertices) - self.xSize)
