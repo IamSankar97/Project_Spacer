@@ -27,7 +27,7 @@ from spacer import Spacer
 import datetime
 from img_processing import remove_back_ground
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 class SpacerEnv(btb.env.BaseEnv):
@@ -59,11 +59,11 @@ class SpacerEnv(btb.env.BaseEnv):
         #   (1)
         self.action_Material = {'roughness': [0, 0.5]}
         #   (1)
-        self.action_mix = {'Factor': [0.0, 0.3]} #{'Factor': [0.0, 0.4]} old noise material3
+        self.action_mix = {'Factor': [0.0, 1]} #{'Factor': [0.0, 0.4]} old noise material3
 
         # self.action_light_cmn = {"value": [0.8, 1]}
         #   (3)
-        self.action_light = {'energy0': [0.02, 0.18], 'ro_x': [-0.42, 0.42], 'ro_y': [-0.42, 0.42]}
+        self.action_light = {'energy0': [0.1, 0.3], 'ro_x': [-0.42, 0.42], 'ro_y': [-0.42, 0.42]}
         # Total = 5
 
         self.reset_action = {'specular': 0.2, 'ior': 2.3, 'roughness': 0.1, 'factor': 0.05, "value": 0.8,
@@ -148,6 +148,7 @@ class SpacerEnv(btb.env.BaseEnv):
     def _env_reset(self):
         # global dummy_actions
         self.episodes += 1
+        self.total_step += 1
         self.step = 0
 
         # Generate random Gaussian noise
