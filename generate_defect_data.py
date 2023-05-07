@@ -598,13 +598,13 @@ def parse_arguments():
                                                                  'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
-    parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
+    parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
     parser.add_argument('--retrain_disc', type=bool, default=False, help='Discriminator device')
 
     parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=15, help='Blendtorch launcher address')
+    parser.add_argument('--blender_add', type=int, default=97, help='Blendtorch launcher address')
     parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2-only_mat.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()

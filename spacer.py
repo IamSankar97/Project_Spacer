@@ -48,7 +48,8 @@ class Spacer:
         mask = (distance > self.outer_r) | (distance < self.inner_r)
 
         # Update the values of surface outside the circular annulus
-        self.surface[mask] = 1
+        # self.surface[mask] = 1
+        self.spacer_mask = mask
 
     def get_point_co(self):
         """

@@ -32,10 +32,28 @@ from spacer import Spacer
 import datetime
 from utils import augument, pol2cart, get_theta, get_no_defect_crops
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
-def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha=40, beta=70):
+def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha=40, width=6, space=0):
+    '''
+
+    Parameters
+    ----------
+    surface
+    grid_spacing
+    r0
+    r1
+    scratch_length
+    theta0
+    alpha
+    width: width of scratch interms of coordinates. if width = 2, defect width = 2*grid spacing
+
+    Returns
+    -------
+
+    '''
+    beta = random.randint(40, 80)
     # Convert to meter
 
     r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
@@ -45,9 +63,12 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha
             "defect length is smaller than asked radius boundary, r1 is adjusted to meet the scratch_length")
 
     #   Defect grove height and depth from mean surface
-    h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), grid_spacing / np.tan(np.radians(beta))
+    h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), \
+                    grid_spacing / np.tan(np.radians(beta))
 
     h_defect = h_total - h_up
+    if h_defect >= 0:
+        h_defect = -0.00001
 
     #   Calculating start and end coordinate of defects in terms of grid points
     x0, y0 = pol2cart(r0, np.radians(theta0))
@@ -74,14 +95,28 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha
     y_coords = y_points + (indices * grid_spacing * sin_angle)
 
     x_coords, y_coords = np.array(np.round(x_coords).astype(int)), np.array(np.round(y_coords).astype(int))
-    mask = (x_coords < surface.shape[0]) & (y_coords < surface.shape[1])
 
-    surface[x_coords[mask], y_coords[mask]] = h_defect
+    if width != 1:
+        # x_co, y_co = x_coords, y_coords
+        offset = np.arange(width)
+        offset_space = np.linspace(0, space, len(offset))
+        offset = offset + offset_space
+        x_coords = np.repeat(x_coords, width) + np.tile(offset, len(x_coords))
+        y_coords = np.repeat(y_coords, width) + np.tile(offset, len(y_coords))
+        x_coords, y_coords = x_coords.astype(int), y_coords.astype(int)
+
+    mask = (x_coords < surface.shape[0]) & (y_coords < surface.shape[1])
+    noise = np.random.uniform(low=-1e-7, high=1e-6, size=x_coords[mask].shape)
+
+    # Add the noise to the height of the bump
+    h_bump = h_defect + noise
+    surface[x_coords[mask], y_coords[mask]] = h_bump
 
 
 class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
         super().__init__(agent)
+        self.def_spacer = None
         self.action_inverted = None
         self.action_pair = None
         self.grid_spacing = 0.00001  # 1e-6
@@ -122,6 +157,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.action_keys = list(self.action_bound.keys())
         self.outer_radius = 16 * 1e-3
         self.thickness = 3.222 * 1e-3
+        self.get_set = 0
         self.grid_radius = self.outer_radius + self.grid_spacing
         self.grid_dim = int(self.grid_radius / self.grid_spacing) * 2
         self.generate_spacer_assign_mat()
@@ -136,11 +172,8 @@ class SpacerEnv(btb.env.BaseEnv):
             if vertice_old.co.z != 1:
                 vertice_old.co.z = vertice_new[2]
 
-    def generate_polygon(self, spacer_mesh_name: str = 'spacer_ring',
-                         def_mesh_name: str = 'spacer_defect', smoothing: bool = 0):
+    def generate_polygon(self, spacer_mesh_name: str = 'spacer_ring', smoothing: bool = 0):
         """
-
-
         Parameters
         ----------
         spacer_mesh_name
@@ -153,21 +186,22 @@ class SpacerEnv(btb.env.BaseEnv):
         """
 
         #   ********* Assuming we have a rectangular grid *************
-        self.xSize = next(i for i in range(len(self.vertices))
-                          if self.vertices[i][0] != self.vertices[i + 1][0]) + 1  # Find the first change in X
+        x_diff = np.diff(self.vertices[:, 0])
+        x_change_idx = np.nonzero(x_diff)[0][0] + 1
+        self.xSize = x_change_idx
+        # self.xSize = next(i for i in range(len(self.vertices))
+        #                   if self.vertices[i][0] != self.vertices[i + 1][0]) + 1  # Find the first change in X
         self.Size = len(self.vertices) // self.xSize
 
         #   Generate the polygons (four vertices linked in a face)
-        polygons, polygons_def = [], []
+        polygons = []
         for i in range(1, len(self.vertices) - self.xSize):
             poly_set = np.array([self.vertices[i][2], self.vertices[i - 1][2], self.vertices[i - 1 + self.xSize][2],
                                  self.vertices[i + self.xSize][2]])
             # collecting spacer and defect polygons
             if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
                 polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
-                # collecting only the defect polygons
-                if np.any((-1 <= poly_set) & (poly_set <= -0.000000001)):
-                    polygons_def.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
+
 
         mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
         obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
@@ -188,17 +222,6 @@ class SpacerEnv(btb.env.BaseEnv):
         bpy.context.view_layer.objects.active = self.spacer
         self.spacer.select_set(True)
 
-        # Create defect mask object
-        mesh = bpy.data.meshes.new(def_mesh_name)  # Create the mesh (inner data)
-        obj = bpy.data.objects.new(def_mesh_name, mesh)  # Create an object
-        obj.data.from_pydata(self.vertices, [], polygons_def)
-
-        bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
-        self.def_spacer = bpy.data.objects[def_mesh_name]
-        self.def_spacer.location = (0, 0.0, 0.0)
-
-        self.def_spacer.active_material = self.material
-
     def get_defect_mask(self, def_mesh_name: str = 'spacer_defect'):
 
         # create an array of indices for each polygon
@@ -209,16 +232,19 @@ class SpacerEnv(btb.env.BaseEnv):
         mask = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1)
         # create a boolean mask for the polygons with defects
         poly_set = self.vertices[vertices[:, :], 2]
-        mask = mask & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set) & (poly_set <= -0.000000001), axis=1)
+
+        mask = mask & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set)
+                                                             & (poly_set < self.get_set), axis=1)
         # filter the indices using the mask
         polygons_def = vertices[mask, :].tolist()
 
         collection = bpy.context.scene.collection
 
         # Unlink the object from the collection
-        collection.objects.unlink(self.def_spacer)
-        # Remove the object from the scene
-        bpy.data.objects.remove(self.def_spacer, do_unlink=True)
+        if self.def_spacer:
+            collection.objects.unlink(self.def_spacer)
+            # Remove the object from the scene
+            bpy.data.objects.remove(self.def_spacer, do_unlink=True)
 
         # Create defect mask object
         mesh = bpy.data.meshes.new(def_mesh_name)  # Create the mesh (inner data)
@@ -228,7 +254,6 @@ class SpacerEnv(btb.env.BaseEnv):
         bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
         self.def_spacer = bpy.data.objects[def_mesh_name]
         self.def_spacer.location = (0, 0.0, 0.0)
-
         self.def_spacer.active_material = self.material
 
     def update_mesh_back_ground(self):
@@ -251,18 +276,23 @@ class SpacerEnv(btb.env.BaseEnv):
         shared_matrix = multiprocessing.Array('i', self.grid_dim * self.grid_dim)
         self.spacer_s = Spacer(shared_matrix, self.grid_spacing, self.outer_radius, self.thickness)
         if with_defect:
-            N = 5
-            # add random noise to the array
-            mean, std = 0, 8
-            noise = np.random.normal(mean, std, size=N)
-            thetas = np.linspace(0, 360, N) + noise
+            # no of defects
+            N = 4
+            subinterval = int(360 / N)
+            thetas = np.array([random.randint(i * subinterval, (i + 1) * subinterval - 1)
+                               for i in range(N)])
             r0s = np.round(np.random.uniform(12.5, 16, N), 2)
             r1s = np.round(np.random.uniform(12.5, 16, N), 2)
             sls = np.round(np.random.uniform(0.1, 10, N), 2)
+            widths = np.random.randint(1, 5, size=N)
+            spaces = np.random.randint(0, 20, size=N)
+            # generate_defect(self.spacer_s.surface, self.spacer_s.grid_spacing,
+            #                 r0s[0], r1s[0], sls[0], thetas[0], widths[0], spaces[0])
+            print('Generate_defect')
             processes = [multiprocessing.Process(target=generate_defect,
                                                  args=(self.spacer_s.surface, self.spacer_s.grid_spacing,
-                                                       r0, r1, sl, theta))
-                         for r0, r1, sl, theta in zip(r0s, r1s, sls, thetas)]
+                                                       r0, r1, sl, theta, width, space))
+                         for r0, r1, sl, theta, width, space in zip(r0s, r1s, sls, thetas, widths, spaces)]
 
             for p in processes:
                 p.start()
@@ -270,6 +300,7 @@ class SpacerEnv(btb.env.BaseEnv):
             # wait for all the processes to finish
             for p in processes:
                 p.join()
+        self.spacer_s.surface[self.spacer_s.spacer_mask] = 1
 
     def inverse_normalization(self, action_range):
         # inverse actions from -1- 1 to respective range
@@ -285,118 +316,10 @@ class SpacerEnv(btb.env.BaseEnv):
         self.spacer_s.get_spacer_point_co()
         self.vertices = self.spacer_s.point_coo
         self.generate_polygon()
+        self.get_defect_mask()
         # self.generate_polygon_defect()
         self.update_scene()
         # bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def.blend')
-
-    # def get_mask_img(self):
-    #     heights = self.spacer_s.surface
-    #     heights[heights == 1] = 0
-    #     grid_size = self.spacer_s.grid_spacing#0.000018
-    #     gd = self.spacer_s.grid_spacing
-    #     print(grid_size, " ", gd)
-    #
-    #     # Set the camera resolution
-    #     camera_resolution = (2048, 2048)
-    #
-    #     # Create a meshgrid of the row and column indices
-    #     x, y = np.meshgrid(np.arange(heights.shape[0]), np.arange(heights.shape[1]))
-    #
-    #     # Scale the X and Y coordinates by the grid size to convert to meters
-    #     x = (x * grid_size).astype(np.float64)
-    #     y = (y * grid_size).astype(np.float64)
-    #
-    #     # Combine the X, Y, and Z coordinates into a single array of vertices
-    #     vertices = np.stack([x.flatten(), y.flatten(), heights.flatten()], axis=-1)
-    #
-    #     # Define the camera projection matrix
-    #     focal_length = 0.13
-    #     projection_matrix = np.array([[focal_length, 0, 0, 0],
-    #                                   [0, focal_length, 0, 0],
-    #                                   [0, 0, 1, 0]])
-    #
-    #     # Project the vertices onto the virtual camera
-    #     pixel_coords = np.dot(projection_matrix.T, vertices.T).T[:, :2]
-    #     pixel_coords /= pixel_coords[:, 1].max()
-    #     pixel_coords *= camera_resolution[1]
-    #
-    #     # Round the pixel coordinates to integers
-    #     pixel_coords = np.round(pixel_coords).astype(int)
-    #
-    #     # Clip the pixel coordinates to the image bounds
-    #     pixel_coords[:, 0] = np.clip(pixel_coords[:, 0], 0, camera_resolution[0] - 1)
-    #     pixel_coords[:, 1] = np.clip(pixel_coords[:, 1], 0, camera_resolution[1] - 1)
-    #
-    #     # Create the image by interpolating the height values at the pixel coordinates
-    #     image = np.zeros(camera_resolution)
-    #     image[pixel_coords[:, 1], pixel_coords[:, 0]] = heights.flatten()[np.arange(heights.size)]
-    #
-    #     # Display the image
-    #     mask_img = np.where(image != 0, 255, 0)
-    #     kernel = np.ones((3, 3), np.uint8)
-    #     # img_erosion = cv2.erode(mask_img.astype(np.uint8), kernel, iterations=1)
-    #     img_dilation = cv2.dilate(mask_img.astype(np.uint8), kernel, iterations=1)
-    #     self.mask_img = Image.fromarray(img_dilation, mode='L').transpose(Image.FLIP_TOP_BOTTOM)
-
-    # def get_mask_img2(self):
-    #     # heights = self.spacer_s.surface
-    #     # heights[heights == 1] = 0
-    #     grid_size = self.spacer_s.grid_spacing#0.000018
-    #     gd = self.spacer_s.grid_spacing
-    #     print(grid_size, " ", gd)
-    #
-    #     # Set the camera resolution
-    #     camera_height = self.camera.location.z
-    #     camera_resolution = bpy.context.scene.render.resolution_x, bpy.context.scene.render.resolution_y
-    #
-    #     vertices = np.array([v.co for v in self.spacer.data.vertices])
-    #     world_to_camera = np.array(self.camera.matrix_world.inverted())
-    #     vertices_homogeneous = np.hstack((vertices, np.ones((vertices.shape[0], 1))))
-    #
-    #     vertices_camera_homogeneous = np.dot(world_to_camera, vertices_homogeneous.T).T
-    #     focal_length = self.camera.data.lens
-    #     aspect_ratio = camera_resolution[0] / camera_resolution[1]
-    #     near_clip = self.camera.data.clip_start
-    #     far_clip = self.camera.data.clip_end
-    #     projection_matrix = np.array([[focal_length / aspect_ratio, 0, 0, 0],
-    #                                   [0, focal_length, 0, 0],
-    #                                   [0, 0, -(far_clip + near_clip) / (far_clip - near_clip),
-    #                                    -2 * far_clip * near_clip / (far_clip - near_clip)],
-    #                                   [0, 0, -1, 0]])
-    #
-    #     # Project the vertices onto the camera's image plane
-    #     vertices_proj_homogeneous = np.dot(projection_matrix, vertices_camera_homogeneous.T).T
-    #     vertices_proj = vertices_proj_homogeneous[:, :2] / vertices_proj_homogeneous[:, 3, None]
-    #     vertices_proj[:, 0] /= aspect_ratio
-    #     vertices_proj *= camera_resolution[::-1]
-    #     vertices_proj[:, 1] = camera_resolution[1] - vertices_proj[:, 1]  # Flip y-axis
-    #     vertices_proj /= vertices_proj[:, 1].max()
-    #     vertices_proj[:, 0] *= camera_resolution[0]
-    #     vertices_proj[:, 1] *= camera_resolution[1]
-    #
-    #     plt.plot(vertices_proj[:, 0], vertices_proj[:, 1], 'o')
-    #     plt.gca().invert_yaxis()
-    #     plt.show()
-    #     # vertices_proj *= camera_resolution[1]
-    #
-    #     # Round the pixel coordinates to integers and clip to the image bounds
-    #     vertices_pix = np.round(vertices_proj).astype(int)
-    #     vertices_pix[:, 0] = np.clip(vertices_pix[:, 0], -(camera_resolution[0]*0.5)+1, (camera_resolution[0]*0.5)-1)
-    #     vertices_pix[:, 1] = np.clip(vertices_pix[:, 1], -(camera_resolution[1]*0.5)+1, (camera_resolution[1]*0.5)-1)
-    #
-    #     # Create the image by setting the pixel values to the mesh height values
-    #     image = np.zeros(np.array(camera_resolution).T)
-    #     heights = vertices_camera_homogeneous[:, 3]
-    #     image[vertices_pix[:, 0], vertices_pix[:, 1]] = heights
-    #
-    #     # Save the image to a file
-    #     plt.imsave('my_image.png', image, cmap='gray')
-    #     # Display the image
-    #     mask_img = np.where(image != 0, 255, 0)
-    #     kernel = np.ones((3, 3), np.uint8)
-    #     # img_erosion = cv2.erode(mask_img.astype(np.uint8), kernel, iterations=1)
-    #     img_dilation = cv2.dilate(mask_img.astype(np.uint8), kernel, iterations=1)
-    #     self.mask_img = Image.fromarray(img_dilation, mode='L').transpose(Image.FLIP_TOP_BOTTOM)
 
     def _env_prepare_step(self, actions: np.ndarray):
         self.step += 1
@@ -483,7 +406,7 @@ class SpacerEnv(btb.env.BaseEnv):
             os.makedirs(file_path_croped, exist_ok=True)
             self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
-
+        # bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
         return dict(obs=self.state, reward=r_, done=done, action_pair=self.action_inverted)
 
     def take_action(self, actions):
