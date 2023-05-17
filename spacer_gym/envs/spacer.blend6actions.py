@@ -32,7 +32,7 @@ from spacer import Spacer
 import datetime
 from utils import augument, pol2cart, get_theta, get_no_defect_crops
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=1, space=0, alpha=40):
@@ -205,14 +205,32 @@ class SpacerEnv(btb.env.BaseEnv):
         #                   if self.vertices[i][0] != self.vertices[i + 1][0]) + 1  # Find the first change in X
         self.Size = len(self.vertices) // self.xSize
 
-        #   Generate the polygons (four vertices linked in a face)
-        polygons = []
-        for i in range(1, len(self.vertices) - self.xSize):
-            poly_set = np.array([self.vertices[i][2], self.vertices[i - 1][2], self.vertices[i - 1 + self.xSize][2],
-                                 self.vertices[i + self.xSize][2]])
-            # collecting spacer and defect polygons
-            if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
-                polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
+        i = np.arange(1, len(self.vertices) - self.xSize)
+        poly_set = np.array([
+            self.vertices[i, 2],
+            self.vertices[i - 1, 2],
+            self.vertices[i - 1 + self.xSize, 2],
+            self.vertices[i + self.xSize, 2]
+        ])
+
+        mask = (i % self.xSize != 0) & (self.vertices[i, 2] != 1) & np.all(poly_set != 1, axis=0)
+        xSize_arr = np.full(len(i), self.xSize)  # Create an array of the same length as i with the value of self.xSize
+        # polygons = np.column_stack((i[mask], i - 1[mask], i - 1 + xSize_arr[mask], i + xSize_arr[mask]))
+        polygons = np.column_stack((
+            i[mask],
+            i[mask] - 1,
+            i[mask] - 1 + self.xSize,
+            i[mask] + self.xSize
+        )).tolist()
+
+        # #   Generate the polygons (four vertices linked in a face)
+        # polygons = []
+        # for i in range(1, len(self.vertices) - self.xSize):
+        #     poly_set = np.array([self.vertices[i][2], self.vertices[i - 1][2], self.vertices[i - 1 + self.xSize][2],
+        #                          self.vertices[i + self.xSize][2]])
+            # collecting polygons
+            # if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
+            #     polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
 
         mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
         obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
@@ -283,7 +301,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.get_defect_mask()
         print('get_defect_mask', time.time() - start_time)
 
-    def get_sample_surface(self, with_defect=True, return_statistics=False):
+    def get_sample_surface(self, with_defect=True, return_statistics=False, paired_defect= False):
         shared_matrix = multiprocessing.Array('i', self.grid_dim * self.grid_dim)
         self.spacer_s = Spacer(shared_matrix, self.grid_spacing, self.outer_radius, self.thickness)
         if with_defect:
@@ -294,15 +312,23 @@ class SpacerEnv(btb.env.BaseEnv):
             r0s = np.round(np.random.uniform(12.5, 16, N), 2)
             r1s = np.round(np.random.uniform(12.5, 16, N), 2)
             sls = np.round(np.random.uniform(0.1, 10, N), 2)
-            pairs = np.random.randint(1, 5, size=N)
-            spaces = np.random.choice([0, 8, 16, 20, 24], size=N)
-            # generate_defect(surface=self.spacer_s.surface, grid_spacing=self.spacer_s.grid_spacing, r0=r0s[0],
-            #                 r1=r1s[0], scratch_length=sls[0], theta0=thetas[0], width=widths[0], space=spaces[0])
             print('Generate_defect')
-            processes = [multiprocessing.Process(target=generate_defect,
-                                                 args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
-                                                       r1, sl, theta, pair, space))
-                         for r0, r1, sl, theta, pair, space in zip(r0s, r1s, sls, thetas, pairs, spaces)]
+            if paired_defect:
+                pairs = np.random.randint(1, 5, size=N)
+                spaces = np.random.choice([0, 8, 16, 20, 24], size=N)
+                # generate_defect(surface=self.spacer_s.surface, grid_spacing=self.spacer_s.grid_spacing, r0=r0s[0],
+                #                 r1=r1s[0], scratch_length=sls[0], theta0=thetas[0], width=widths[0], space=spaces[0])
+
+                processes = [multiprocessing.Process(target=generate_defect,
+                                                     args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
+                                                           r1, sl, theta, pair, space))
+                             for r0, r1, sl, theta, pair, space in zip(r0s, r1s, sls, thetas, pairs, spaces)]
+            else:
+                pairs, spaces = 1, 0
+                processes = [multiprocessing.Process(target=generate_defect,
+                                                     args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
+                                                           r1, sl, theta))
+                             for r0, r1, sl, theta in zip(r0s, r1s, sls, thetas)]
 
             for p in processes:
                 p.start()
@@ -310,6 +336,7 @@ class SpacerEnv(btb.env.BaseEnv):
             # wait for all the processes to finish
             for p in processes:
                 p.join()
+
         self.spacer_s.surface[self.spacer_s.spacer_mask] = 1
         if return_statistics:
             return {'r0s': r0s, 'r1s': r1s, 'sls': sls, 'thetas': thetas, 'pairs': pairs, 'spaces': spaces}
@@ -429,7 +456,7 @@ class SpacerEnv(btb.env.BaseEnv):
             os.makedirs(file_path_croped, exist_ok=True)
             self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
-        # bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
+        bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
         return dict(obs=self.state, reward=r_, done=done, action_pair=self.action_inverted)
 
     def take_action(self, actions):
