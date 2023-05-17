@@ -35,7 +35,7 @@ from utils import augument, pol2cart, get_theta, get_no_defect_crops
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
-def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha=40, width=6, space=0):
+def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=1, space=0, alpha=40):
     '''
 
     Parameters
@@ -54,6 +54,7 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha
 
     '''
     beta = random.randint(40, 80)
+    # beta = 70
     # Convert to meter
 
     r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
@@ -96,21 +97,29 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, alpha
 
     x_coords, y_coords = np.array(np.round(x_coords).astype(int)), np.array(np.round(y_coords).astype(int))
 
-    if width != 1:
+    x_coords_left, y_coords_left = np.add(x_coords, 1), y_coords
+    x_coords_right, y_coords_right = x_coords, np.add(y_coords, 1)
+    if pair != 1 and space != 0:
         # x_co, y_co = x_coords, y_coords
-        offset = np.arange(width)
+        offset = np.arange(pair)
         offset_space = np.linspace(0, space, len(offset))
         offset = offset + offset_space
-        x_coords = np.repeat(x_coords, width) + np.tile(offset, len(x_coords))
-        y_coords = np.repeat(y_coords, width) + np.tile(offset, len(y_coords))
+        x_coords = np.repeat(x_coords, pair) + np.tile(offset, len(x_coords))
+        y_coords = np.repeat(y_coords, pair) #+ np.tile(offset, len(y_coords))
         x_coords, y_coords = x_coords.astype(int), y_coords.astype(int)
 
     mask = (x_coords < surface.shape[0]) & (y_coords < surface.shape[1])
+    # mask_left = (x_coords_left < surface.shape[0]) & (y_coords_left < surface.shape[1])
+    # mask_right = (x_coords_right < surface.shape[0]) & (y_coords_right < surface.shape[1])
     noise = np.random.uniform(low=-1e-7, high=1e-6, size=x_coords[mask].shape)
 
     # Add the noise to the height of the bump
     h_bump = h_defect + noise
+    # hup_l = h_up + noise
+    # hup_r = h_up - noise
     surface[x_coords[mask], y_coords[mask]] = h_bump
+    # surface[x_coords[mask_left], y_coords[mask_left]] = hup_l
+    # surface[x_coords[mask_right], y_coords[mask_right]] = hup_r
 
 
 class SpacerEnv(btb.env.BaseEnv):
@@ -162,6 +171,9 @@ class SpacerEnv(btb.env.BaseEnv):
         self.grid_dim = int(self.grid_radius / self.grid_spacing) * 2
         self.generate_spacer_assign_mat()
         self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
+        self.df_stats = pd.DataFrame(columns=['r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
+        self.df_stat = []
+
         # self.update_scene()
 
     def update_scene(self):
@@ -202,7 +214,6 @@ class SpacerEnv(btb.env.BaseEnv):
             if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
                 polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
 
-
         mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
         obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
         obj.data.from_pydata(self.vertices, [], polygons)  # Associate vertices and polygons
@@ -229,12 +240,12 @@ class SpacerEnv(btb.env.BaseEnv):
         # create an array of vertices for each polygon
         vertices = np.array([indices, indices - 1, indices - 1 + self.xSize, indices + self.xSize]).T
         # create a boolean mask for the defect polygons
-        mask = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1)
+        mask = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1) & (self.vertices[indices, 2] != 0)
         # create a boolean mask for the polygons with defects
         poly_set = self.vertices[vertices[:, :], 2]
 
         mask = mask & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set)
-                                                             & (poly_set < self.get_set), axis=1)
+                                                             & (poly_set != 0), axis=1)
         # filter the indices using the mask
         polygons_def = vertices[mask, :].tolist()
 
@@ -272,27 +283,26 @@ class SpacerEnv(btb.env.BaseEnv):
         self.get_defect_mask()
         print('get_defect_mask', time.time() - start_time)
 
-    def get_sample_surface(self, with_defect=True):
+    def get_sample_surface(self, with_defect=True, return_statistics=False):
         shared_matrix = multiprocessing.Array('i', self.grid_dim * self.grid_dim)
         self.spacer_s = Spacer(shared_matrix, self.grid_spacing, self.outer_radius, self.thickness)
         if with_defect:
             # no of defects
-            N = 4
+            N = 5
             subinterval = int(360 / N)
-            thetas = np.array([random.randint(i * subinterval, (i + 1) * subinterval - 1)
-                               for i in range(N)])
+            thetas = np.array([i * subinterval for i in range(N)])
             r0s = np.round(np.random.uniform(12.5, 16, N), 2)
             r1s = np.round(np.random.uniform(12.5, 16, N), 2)
             sls = np.round(np.random.uniform(0.1, 10, N), 2)
-            widths = np.random.randint(1, 5, size=N)
-            spaces = np.random.randint(0, 20, size=N)
-            # generate_defect(self.spacer_s.surface, self.spacer_s.grid_spacing,
-            #                 r0s[0], r1s[0], sls[0], thetas[0], widths[0], spaces[0])
+            pairs = np.random.randint(1, 5, size=N)
+            spaces = np.random.choice([0, 8, 16, 20, 24], size=N)
+            # generate_defect(surface=self.spacer_s.surface, grid_spacing=self.spacer_s.grid_spacing, r0=r0s[0],
+            #                 r1=r1s[0], scratch_length=sls[0], theta0=thetas[0], width=widths[0], space=spaces[0])
             print('Generate_defect')
             processes = [multiprocessing.Process(target=generate_defect,
-                                                 args=(self.spacer_s.surface, self.spacer_s.grid_spacing,
-                                                       r0, r1, sl, theta, width, space))
-                         for r0, r1, sl, theta, width, space in zip(r0s, r1s, sls, thetas, widths, spaces)]
+                                                 args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
+                                                       r1, sl, theta, pair, space))
+                         for r0, r1, sl, theta, pair, space in zip(r0s, r1s, sls, thetas, pairs, spaces)]
 
             for p in processes:
                 p.start()
@@ -301,6 +311,8 @@ class SpacerEnv(btb.env.BaseEnv):
             for p in processes:
                 p.join()
         self.spacer_s.surface[self.spacer_s.spacer_mask] = 1
+        if return_statistics:
+            return {'r0s': r0s, 'r1s': r1s, 'sls': sls, 'thetas': thetas, 'pairs': pairs, 'spaces': spaces}
 
     def inverse_normalization(self, action_range):
         # inverse actions from -1- 1 to respective range
@@ -312,7 +324,7 @@ class SpacerEnv(btb.env.BaseEnv):
         return action_inverse_normalized
 
     def generate_spacer_assign_mat(self):
-        self.get_sample_surface(with_defect=True)
+        self.dfct_statics = self.get_sample_surface(with_defect=True, return_statistics=True)
         self.spacer_s.get_spacer_point_co()
         self.vertices = self.spacer_s.point_coo
         self.generate_polygon()
@@ -325,7 +337,9 @@ class SpacerEnv(btb.env.BaseEnv):
         self.step += 1
         self.total_step += 1
         self.take_action(actions)
-        self.get_sample_surface(with_defect=True)
+        dfct_statics = self.get_sample_surface(with_defect=True, return_statistics=True)
+        new_row = pd.DataFrame(dfct_statics, columns=self.df_stats.columns)
+        self.df_stat.append(new_row)
         self.spacer_s.get_spacer_point_co()
         self.vertices = self.spacer_s.point_coo
         self.update_mesh_back_ground()
@@ -333,6 +347,7 @@ class SpacerEnv(btb.env.BaseEnv):
     def _env_reset(self):
         # global dummy_actions
         self.episodes += 1
+        self.total_step += 1
         self.step = 0
 
         # Generate random Gaussian noise
@@ -351,6 +366,14 @@ class SpacerEnv(btb.env.BaseEnv):
 
         # spacer = self.reset_sample_surface(with_defect=False)
         # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
+        file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/'.format(
+            self.g_time_stamp)
+        os.makedirs(file_path_full, exist_ok=True)
+        try:
+            df_stats = pd.concat(self.df_stat, ignore_index=True)
+            df_stats.to_csv(file_path_full+'defect_statistics.csv', index=False)
+        except:
+            pass
         return self._env_post_step()
 
     def _env_post_step(self):

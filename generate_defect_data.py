@@ -590,11 +590,11 @@ def parse_arguments():
                         default='/home/mohanty/PycharmProjects/Data/spacer_data/train_centered_parent',
                         help='Full spacer images for discriminator training')
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
-    parser.add_argument('--batch_size', type=int, default=1000, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=5, help='Episode length = batch_size * '
+    parser.add_argument('--batch_size', type=int, default=1, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=200, help='Episode length = batch_size * '
                                                                           'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
-    parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
+    parser.add_argument('--n_epochs', type=int, default=1, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
@@ -655,9 +655,12 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
                      '02:43:39/PPO_model/PPO_gen_model_20000.zip', env=py_env)
     obs = py_env.reset()
     #   Multi-processed RL Training
-    for i in range(5000):
+    for i in range(100):
         action, _states = model.predict(obs)
         obs, rewards, dones, info = py_env.step(action)
+        if dones == True:
+            py_env.reset()
+            break
         print("accuracy", py_env.generator_acc, 'rewards', rewards)
 
 
