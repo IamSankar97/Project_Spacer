@@ -7,7 +7,6 @@ import os
 import sys
 import random
 from collections import OrderedDict
-from stable_baselines3.common.vec_env import DummyVecEnv
 from skimage.util import view_as_windows
 from stable_baselines3 import PPO
 import pandas as pd
@@ -604,7 +603,7 @@ def parse_arguments():
     parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
     parser.add_argument('--blender_add', type=int, default=97, help='Blendtorch launcher address')
-    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2-only_mat2.blend',
+    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2-only_mat2_nd_defect_mat.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
 

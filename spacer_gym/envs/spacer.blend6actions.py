@@ -126,6 +126,7 @@ class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
         super().__init__(agent)
         self.def_spacer = None
+        self.spacer = None
         self.action_inverted = None
         self.action_pair = None
         self.grid_spacing = 0.00001  # 1e-6
@@ -169,6 +170,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.get_set = 0
         self.grid_radius = self.outer_radius + self.grid_spacing
         self.grid_dim = int(self.grid_radius / self.grid_spacing) * 2
+        self.material = bpy.data.materials.get("spacer")
+        self.def_material = bpy.data.materials.get("defect")
         self.generate_spacer_assign_mat()
         self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
         self.df_stats = pd.DataFrame(columns=['r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
@@ -184,20 +187,75 @@ class SpacerEnv(btb.env.BaseEnv):
             if vertice_old.co.z != 1:
                 vertice_old.co.z = vertice_new[2]
 
-    def generate_polygon(self, spacer_mesh_name: str = 'spacer_ring', smoothing: bool = 0):
-        """
-        Parameters
-        ----------
-        spacer_mesh_name
-        def_mesh_name
-        smoothing
+    # def generate_polygon(self, spacer_mesh_name: str = 'spacer_ring', smoothing: bool = 0):
+    #     """
+    #     Parameters
+    #     ----------
+    #     spacer_mesh_name
+    #     def_mesh_name
+    #     smoothing
+    #
+    #     Returns
+    #     -------
+    #
+    #     """
+    #
+    #     #   ********* Assuming we have a rectangular grid *************
+    #     x_diff = np.diff(self.vertices[:, 0])
+    #     x_change_idx = np.nonzero(x_diff)[0][0] + 1
+    #     self.xSize = x_change_idx
+    #     # self.xSize = next(i for i in range(len(self.vertices))
+    #     #                   if self.vertices[i][0] != self.vertices[i + 1][0]) + 1  # Find the first change in X
+    #     self.Size = len(self.vertices) // self.xSize
+    #
+    #     i = np.arange(1, len(self.vertices) - self.xSize)
+    #     poly_set = np.array([
+    #         self.vertices[i, 2],
+    #         self.vertices[i - 1, 2],
+    #         self.vertices[i - 1 + self.xSize, 2],
+    #         self.vertices[i + self.xSize, 2]
+    #     ])
+    #
+    #     mask = (i % self.xSize != 0) & (self.vertices[i, 2] != 1) & np.all(poly_set != 1, axis=0)
+    #     xSize_arr = np.full(len(i), self.xSize)  # Create an array of the same length as i with the value of self.xSize
+    #     # polygons = np.column_stack((i[mask], i - 1[mask], i - 1 + xSize_arr[mask], i + xSize_arr[mask]))
+    #     polygons = np.column_stack((
+    #         i[mask],
+    #         i[mask] - 1,
+    #         i[mask] - 1 + self.xSize,
+    #         i[mask] + self.xSize
+    #     )).tolist()
+    #
+    #     # #   Generate the polygons (four vertices linked in a face)
+    #     # polygons = []
+    #     # for i in range(1, len(self.vertices) - self.xSize):
+    #     #     poly_set = np.array([self.vertices[i][2], self.vertices[i - 1][2], self.vertices[i - 1 + self.xSize][2],
+    #     #                          self.vertices[i + self.xSize][2]])
+    #         # collecting polygons
+    #         # if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
+    #         #     polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
+    #
+    #     mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
+    #     obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
+    #     obj.data.from_pydata(self.vertices, [], polygons)  # Associate vertices and polygons
+    #
+    #     if smoothing:
+    #         for p in obj.data.polygons:  # Set smooth shading (if needed)
+    #             p.use_smooth = True
+    #
+    #     bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+    #     self.spacer = bpy.data.objects[spacer_mesh_name]
+    #     self.spacer.location = (0.0, 0.0, 0.0)
+    #
+    #
+    #
+    #     # Assign the material to the object
+    #     self.spacer.active_material = self.material
+    #     bpy.context.view_layer.objects.active = self.spacer
+    #     self.spacer.select_set(True)
 
-        Returns
-        -------
+    def get_defect_mask(self, def_mesh_name: str = 'spacer_defect', spacer_mesh_name: str = 'spacer_ring'):
 
-        """
-
-        #   ********* Assuming we have a rectangular grid *************
         x_diff = np.diff(self.vertices[:, 0])
         x_change_idx = np.nonzero(x_diff)[0][0] + 1
         self.xSize = x_change_idx
@@ -205,67 +263,25 @@ class SpacerEnv(btb.env.BaseEnv):
         #                   if self.vertices[i][0] != self.vertices[i + 1][0]) + 1  # Find the first change in X
         self.Size = len(self.vertices) // self.xSize
 
-        i = np.arange(1, len(self.vertices) - self.xSize)
-        poly_set = np.array([
-            self.vertices[i, 2],
-            self.vertices[i - 1, 2],
-            self.vertices[i - 1 + self.xSize, 2],
-            self.vertices[i + self.xSize, 2]
-        ])
-
-        mask = (i % self.xSize != 0) & (self.vertices[i, 2] != 1) & np.all(poly_set != 1, axis=0)
-        xSize_arr = np.full(len(i), self.xSize)  # Create an array of the same length as i with the value of self.xSize
-        # polygons = np.column_stack((i[mask], i - 1[mask], i - 1 + xSize_arr[mask], i + xSize_arr[mask]))
-        polygons = np.column_stack((
-            i[mask],
-            i[mask] - 1,
-            i[mask] - 1 + self.xSize,
-            i[mask] + self.xSize
-        )).tolist()
-
-        # #   Generate the polygons (four vertices linked in a face)
-        # polygons = []
-        # for i in range(1, len(self.vertices) - self.xSize):
-        #     poly_set = np.array([self.vertices[i][2], self.vertices[i - 1][2], self.vertices[i - 1 + self.xSize][2],
-        #                          self.vertices[i + self.xSize][2]])
-            # collecting polygons
-            # if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
-            #     polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
-
-        mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
-        obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
-        obj.data.from_pydata(self.vertices, [], polygons)  # Associate vertices and polygons
-
-        if smoothing:
-            for p in obj.data.polygons:  # Set smooth shading (if needed)
-                p.use_smooth = True
-
-        bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
-        self.spacer = bpy.data.objects[spacer_mesh_name]
-        self.spacer.location = (0.0, 0.0, 0.0)
-
-        self.material = bpy.data.materials.get("spacer")
-
-        # Assign the material to the object
-        self.spacer.active_material = self.material
-        bpy.context.view_layer.objects.active = self.spacer
-        self.spacer.select_set(True)
-
-    def get_defect_mask(self, def_mesh_name: str = 'spacer_defect'):
-
         # create an array of indices for each polygon
         indices = np.arange(1, len(self.vertices) - self.xSize)
         # create an array of vertices for each polygon
         vertices = np.array([indices, indices - 1, indices - 1 + self.xSize, indices + self.xSize]).T
         # create a boolean mask for the defect polygons
-        mask = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1) & (self.vertices[indices, 2] != 0)
+        mask_defect = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1) & (self.vertices[indices, 2] != 0)
         # create a boolean mask for the polygons with defects
         poly_set = self.vertices[vertices[:, :], 2]
 
-        mask = mask & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set)
+        mask_defect = mask_defect & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set)
                                                              & (poly_set != 0), axis=1)
+
+        mask_spacer = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1)
+        mask_spacer = mask_spacer & np.all(poly_set != 1, axis=1)
+        mask_spacer = mask_spacer & ~mask_defect
+
         # filter the indices using the mask
-        polygons_def = vertices[mask, :].tolist()
+        polygons_def = vertices[mask_defect, :].tolist()
+        polygons_spacer = vertices[mask_spacer, :].tolist()
 
         collection = bpy.context.scene.collection
 
@@ -283,7 +299,23 @@ class SpacerEnv(btb.env.BaseEnv):
         bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
         self.def_spacer = bpy.data.objects[def_mesh_name]
         self.def_spacer.location = (0, 0.0, 0.0)
-        self.def_spacer.active_material = self.material
+        self.def_spacer.active_material = self.def_material
+
+        # Unlink the object from the collection
+        if self.spacer:
+            collection.objects.unlink(self.spacer)
+            # Remove the object from the scene
+            bpy.data.objects.remove(self.spacer, do_unlink=True)
+
+        # Create defect mask object
+        mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
+        obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
+        obj.data.from_pydata(self.vertices, [], polygons_spacer)
+
+        bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+        self.spacer = bpy.data.objects[spacer_mesh_name]
+        self.spacer.location = (0, 0.0, 0.0)
+        self.spacer.active_material = self.material
 
     def update_mesh_back_ground(self):
         """
@@ -354,9 +386,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.dfct_statics = self.get_sample_surface(with_defect=True, return_statistics=True)
         self.spacer_s.get_spacer_point_co()
         self.vertices = self.spacer_s.point_coo
-        self.generate_polygon()
+        # self.generate_polygon()
         self.get_defect_mask()
-        # self.generate_polygon_defect()
         self.update_scene()
         # bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def.blend')
 
@@ -369,7 +400,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.df_stat.append(new_row)
         self.spacer_s.get_spacer_point_co()
         self.vertices = self.spacer_s.point_coo
-        self.update_mesh_back_ground()
+        self.get_defect_mask()
+        # self.update_mesh_back_ground()
 
     def _env_reset(self):
         # global dummy_actions
@@ -392,7 +424,6 @@ class SpacerEnv(btb.env.BaseEnv):
         self.update_lights(self.reset_action['energy0'], self.reset_action['ro_x'], self.reset_action['ro_y'])
 
         # spacer = self.reset_sample_surface(with_defect=False)
-        # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
         file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/'.format(
             self.g_time_stamp)
         os.makedirs(file_path_full, exist_ok=True)
@@ -417,7 +448,7 @@ class SpacerEnv(btb.env.BaseEnv):
         os.makedirs(img_file_path, exist_ok=True)
         os.makedirs(mask_file_path, exist_ok=True)
 
-        self.def_spacer.hide_render = True
+        self.def_spacer.hide_render = False
         self.spacer.hide_render = False
         pil_img = off.render(img_file_path + '/image{}_{}.png'.format(self.episodes, self.total_step))
         # pil_img.save(img_file_path + '/image{}_{}.png'.format(self.episodes, self.total_step))
@@ -456,7 +487,7 @@ class SpacerEnv(btb.env.BaseEnv):
             os.makedirs(file_path_croped, exist_ok=True)
             self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
-        bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
+        # bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
         return dict(obs=self.state, reward=r_, done=done, action_pair=self.action_inverted)
 
     def take_action(self, actions):
