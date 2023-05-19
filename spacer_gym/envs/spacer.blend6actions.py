@@ -72,8 +72,9 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=
         h_defect = -0.00001
 
     #   Calculating start and end coordinate of defects in terms of grid points
+    theta1 = get_theta(r0, r1, theta0, scratch_length)
     x0, y0 = pol2cart(r0, np.radians(theta0))
-    x1, y1 = pol2cart(r1, get_theta(r0, r1, theta0, scratch_length))
+    x1, y1 = pol2cart(r1, theta1)
 
     # convert coordinates in meters to grid points
     def_co = np.array([x0, y0, x1, y1]) / grid_spacing
@@ -333,7 +334,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.get_defect_mask()
         print('get_defect_mask', time.time() - start_time)
 
-    def get_sample_surface(self, with_defect=True, return_statistics=False, paired_defect= False):
+    def get_sample_surface(self, with_defect=True, return_statistics=False, paired_defect=False):
         shared_matrix = multiprocessing.Array('i', self.grid_dim * self.grid_dim)
         self.spacer_s = Spacer(shared_matrix, self.grid_spacing, self.outer_radius, self.thickness)
         if with_defect:
@@ -341,12 +342,17 @@ class SpacerEnv(btb.env.BaseEnv):
             N = 5
             subinterval = int(360 / N)
             thetas = np.array([i * subinterval for i in range(N)])
+            noise = np.random.uniform(-10, 10, N)
+            thetas = thetas + noise
+            # Clip the angles to ensure they are between 0 and 360 degrees
+            thetas = np.clip(thetas, 0, 360)
+
             r0s = np.round(np.random.uniform(12.5, 16, N), 2)
             r1s = np.round(np.random.uniform(12.5, 16, N), 2)
             sls = np.round(np.random.uniform(0.1, 10, N), 2)
             print('Generate_defect')
             if paired_defect:
-                pairs = np.random.randint(1, 5, size=N)
+                pairs = np.random.randint(1, 3, size=N)
                 spaces = np.random.choice([0, 8, 16, 20, 24], size=N)
                 # generate_defect(surface=self.spacer_s.surface, grid_spacing=self.spacer_s.grid_spacing, r0=r0s[0],
                 #                 r1=r1s[0], scratch_length=sls[0], theta0=thetas[0], width=widths[0], space=spaces[0])
@@ -455,8 +461,16 @@ class SpacerEnv(btb.env.BaseEnv):
 
         self.spacer.hide_render = True
         self.def_spacer.hide_render = False
+
+        mat = self.def_spacer.data.materials[0]
+        if not mat.use_nodes:
+            mat.use_nodes = True
+        mat_nodes = mat.node_tree.nodes['Principled BSDF']
+        mat_nodes.inputs['Emission'].default_value = (1,1,1,1)
+
         mask_img = off.render(mask_file_path + '/mask{}_{}.png'.
                               format(self.episodes, self.total_step))
+        mat_nodes.inputs['Emission'].default_value = (0, 0, 0, 1)
         # ret, binary_img = cv2.threshold(np.array(mask_img), 1.0, 255, cv2.THRESH_BINARY)
         # RM_BG_img = cv2.bitwise_and(np.array(mask_img), np.array(mask_img), mask=binary_img)
         # RM_BG_img[RM_BG_img != 0] = 255
