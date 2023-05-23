@@ -32,10 +32,20 @@ from spacer import Spacer
 import datetime
 from utils import augument, pol2cart, get_theta, get_no_defect_crops
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
-def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=1, space=0, alpha=40):
+# else:
+# angle = np.arctan2(spacer_class.Ymesh, spacer_class.Xmesh)
+# angle = (angle + 2 * np.pi) % (2 * np.pi)
+# selected_coordinates = np.logical_and.reduce([np.abs(spacer_class.distance - r0) <= spacer_class.grid_spacing * 2,
+#                                               (angle >= theta0) & (angle <= theta1)])
+# spacer_class.surface[selected_coordinates] = h_defect
+# mask = np.logical_and(spacer_class.surface != 0, spacer_class.surface != 1)
+# noise = np.random.uniform(low=-1e-7, high=1e-6, size=spacer_class.surface.shape)
+# spacer_class.surface = np.where(mask, spacer_class.surface + noise, spacer_class.surface)
+
+def generate_defect(surface, grid_spacing, Xmesh, Ymesh, r0, r1, scratch_length, theta0, pair=1, space=0, alpha=40):
     '''
 
     Parameters
@@ -135,7 +145,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.camera.location = (0.0, 0.0, 0.15)
         self.light0 = bpy.data.objects["L0_top"]
         self.light0.location = (0.0, 0.0, 0.15)
-        self.episodes, self.step, self.total_step = -2, 0, 0
+        self.episodes, self.step, self.total_step = 4, 0, 0
         self.img_addr = 'spacer_gym/spacer_env_render/image_spacer.png'
         # Note, ensure that physics run at same speed.
         self.fps = bpy.context.scene.render.fps
@@ -175,7 +185,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.def_material = bpy.data.materials.get("defect")
         self.generate_spacer_assign_mat()
         self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
-        self.df_stats = pd.DataFrame(columns=['r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
+        self.df_stats = pd.DataFrame(columns=['defect_width', 'r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
         self.df_stat = []
 
         # self.update_scene()
@@ -274,7 +284,7 @@ class SpacerEnv(btb.env.BaseEnv):
         poly_set = self.vertices[vertices[:, :], 2]
 
         mask_defect = mask_defect & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set)
-                                                             & (poly_set != 0), axis=1)
+                                                                           & (poly_set != 0), axis=1)
 
         mask_spacer = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1)
         mask_spacer = mask_spacer & np.all(poly_set != 1, axis=1)
@@ -342,7 +352,7 @@ class SpacerEnv(btb.env.BaseEnv):
             N = 5
             subinterval = int(360 / N)
             thetas = np.array([i * subinterval for i in range(N)])
-            noise = np.random.uniform(-10, 10, N)
+            noise = np.random.uniform(-45, 45, N)
             thetas = thetas + noise
             # Clip the angles to ensure they are between 0 and 360 degrees
             thetas = np.clip(thetas, 0, 360)
@@ -358,14 +368,16 @@ class SpacerEnv(btb.env.BaseEnv):
                 #                 r1=r1s[0], scratch_length=sls[0], theta0=thetas[0], width=widths[0], space=spaces[0])
 
                 processes = [multiprocessing.Process(target=generate_defect,
-                                                     args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
-                                                           r1, sl, theta, pair, space))
+                                                     args=(self.spacer_s.surface, self.spacer_s.grid_spacing,
+                                                           self.spacer_s.Xmesh, self.spacer_s.Ymesh, r0, r1, sl, theta,
+                                                           pair, space))
                              for r0, r1, sl, theta, pair, space in zip(r0s, r1s, sls, thetas, pairs, spaces)]
             else:
                 pairs, spaces = 1, 0
                 processes = [multiprocessing.Process(target=generate_defect,
-                                                     args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
-                                                           r1, sl, theta))
+                                                     args=(self.spacer_s.surface, self.spacer_s.grid_spacing,
+                                                           self.spacer_s.Xmesh, self.spacer_s.Ymesh, r0, r1, sl,
+                                                           theta))
                              for r0, r1, sl, theta in zip(r0s, r1s, sls, thetas)]
 
             for p in processes:
@@ -377,7 +389,8 @@ class SpacerEnv(btb.env.BaseEnv):
 
         self.spacer_s.surface[self.spacer_s.spacer_mask] = 1
         if return_statistics:
-            return {'r0s': r0s, 'r1s': r1s, 'sls': sls, 'thetas': thetas, 'pairs': pairs, 'spaces': spaces}
+            return {'defect_width': self.grid_spacing, 'r0s': r0s, 'r1s': r1s, 'sls': sls, 'thetas': thetas,
+                    'pairs': pairs, 'spaces': spaces}
 
     def inverse_normalization(self, action_range):
         # inverse actions from -1- 1 to respective range
@@ -435,7 +448,7 @@ class SpacerEnv(btb.env.BaseEnv):
         os.makedirs(file_path_full, exist_ok=True)
         try:
             df_stats = pd.concat(self.df_stat, ignore_index=True)
-            df_stats.to_csv(file_path_full+'defect_statistics.csv', index=False)
+            df_stats.to_csv(file_path_full + 'defect_statistics.csv', index=False)
         except:
             pass
         return self._env_post_step()
@@ -466,7 +479,7 @@ class SpacerEnv(btb.env.BaseEnv):
         if not mat.use_nodes:
             mat.use_nodes = True
         mat_nodes = mat.node_tree.nodes['Principled BSDF']
-        mat_nodes.inputs['Emission'].default_value = (1,1,1,1)
+        mat_nodes.inputs['Emission'].default_value = (1, 1, 1, 1)
 
         mask_img = off.render(mask_file_path + '/mask{}_{}.png'.
                               format(self.episodes, self.total_step))
@@ -558,7 +571,7 @@ class SpacerEnv(btb.env.BaseEnv):
         # dummy_alpha = tuple([1.0])
         # self.light0.color = rgb_color + dummy_alpha
         #   set energy
-        self.light0.data.energy = energy0
+        self.light0.data.energy = energy0 # 0.5
         # Exclude for 6 actions
         # self.light0.data.spread = Spread
         # #   set light angle

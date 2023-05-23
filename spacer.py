@@ -42,10 +42,10 @@ class Spacer:
         x_center, y_center = 0, 0
 
         # Calculate the distance of each point in the mesh grid from the center of the circle
-        distance = np.sqrt((self.Xmesh - x_center) ** 2 + (self.Ymesh - y_center) ** 2)
+        self.distance = np.sqrt((self.Xmesh - x_center) ** 2 + (self.Ymesh - y_center) ** 2)
 
         # Create a boolean mask for the circular annulus
-        mask = (distance > self.outer_r) | (distance < self.inner_r)
+        mask = (self.distance > self.outer_r) | (self.distance < self.inner_r)
 
         # Update the values of surface outside the circular annulus
         # self.surface[mask] = 1
