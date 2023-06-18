@@ -2,12 +2,15 @@
 # import pydevd_pycharm
 # pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
+import sys
+import os
+sys.path.append(os.getcwd())
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
 import bpy
 import bmesh
 import time
 import multiprocessing
-import sys
-import os
 from skimage.util import view_as_windows
 import warnings
 from PIL import Image
@@ -19,9 +22,6 @@ from spacer import Spacer
 import datetime
 from utils import pol2cart, get_theta
 
-sys.path.append(os.getcwd())
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
@@ -300,7 +300,7 @@ class SpacerEnv(btb.env.BaseEnv):
 
     def generate_spacer_assign_mat(self):
         if self.training:
-            self.spacer = bpy.data.objects['spacer_ring_train.64']
+            self.spacer = bpy.data.objects['spacer_ring_train']
 
         else:
             self.dfct_statics = self.get_sample_surface(with_defect=not self.training,
