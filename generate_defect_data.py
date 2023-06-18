@@ -589,7 +589,7 @@ def parse_arguments():
                         help='Full spacer images for discriminator training')
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=66, help='Episode length = batch_size * '
+    parser.add_argument('--batches_in_episode', type=int, default=500, help='Episode length = batch_size * '
                                                                             'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=1, help='total epochs the gathered experiences'
@@ -654,7 +654,7 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
                      '02:43:39/PPO_model/PPO_gen_model_20000.zip', env=py_env)
     obs = py_env.reset()
     #   Multi-processed RL Training
-    for i in range(66):
+    for i in range(500):
         action, _states = model.predict(obs)
         obs, rewards, dones, info = py_env.step(action)
         if dones == True:

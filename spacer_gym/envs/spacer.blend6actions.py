@@ -126,7 +126,7 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=
 
     # Add the noise to the height of the bump
     if pair != 1 and space != 0:
-        h_bump = np.random.uniform(low=-1e-6, high=1e-6, size=x_coords[mask].shape)
+        h_bump = np.random.uniform(low=-1e-7, high=1e-6, size=x_coords[mask].shape)
     else:
         h_bump = h_defect + noise
     # hup_l = h_up + noise
@@ -162,6 +162,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.topology_dir = '/home/mohanty/PycharmProjects/Data/pkl_6/'
         self.g_time_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.topologies = os.listdir(self.topology_dir)
+        # 44 images from below index
         self.x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
                          28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
 
@@ -200,14 +201,16 @@ class SpacerEnv(btb.env.BaseEnv):
                 vertice_old.co.z = vertice_new[2]
 
     def get_grid_spacing(self):
-        if self.step <= 65:
+        if self.step <= 64:
             self.grid_spacing = 0.00001
-        elif 65 < self.step <= 130:
+        elif 64 < self.step <= 129:
             self.grid_spacing = 0.00002
-        elif 133 < self.step <= 200:
+        elif 129 < self.step <= 194:
             self.grid_spacing = 0.000008
+        elif 194 < self.step <= 259:
+            self.grid_spacing = 0.000002
         else:
-            self.grid_spacing = 0.000008
+            self.grid_spacing = 0.00005
         self.grid_radius = self.outer_radius + self.grid_spacing
         self.grid_dim = int(self.grid_radius / self.grid_spacing) * 2
 
@@ -296,7 +299,7 @@ class SpacerEnv(btb.env.BaseEnv):
             N = 5
             subinterval = int(360 / N)
             thetas = np.array([i * subinterval for i in range(N)])
-            noise = np.random.uniform(-45, 45, N)
+            noise = np.random.uniform(-2, 2, N)
             thetas = thetas + noise
             # Clip the angles to ensure they are between 0 and 360 degrees
             thetas = np.clip(thetas, 0, 360)
@@ -368,10 +371,10 @@ class SpacerEnv(btb.env.BaseEnv):
         self.total_step += 1
         self.get_grid_spacing()
         self.take_action(actions)
-        if self.step <= 200:
+        if self.step < 260:
             paired_defect = False
         else:
-            paired_defect = True
+            paired_defect = False
         dfct_statics = self.get_sample_surface(with_defect=True, return_statistics=True, paired_defect=paired_defect)
         new_row = pd.DataFrame(dfct_statics, columns=self.df_stats.columns)
         self.df_stat.append(new_row)
@@ -384,7 +387,7 @@ class SpacerEnv(btb.env.BaseEnv):
         # global dummy_actions
         self.episodes += 1
         self.total_step += 1
-        self.step = 66
+        self.step = 500
 
         # Generate random Gaussian noise
         noise = np.random.normal(scale=0.1, size=len(self.reset_action))
@@ -474,7 +477,7 @@ class SpacerEnv(btb.env.BaseEnv):
             os.makedirs(file_path_croped, exist_ok=True)
             self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
-        # bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
+        bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
         return dict(obs=self.state, reward=r_, done=done, action_pair=self.action_inverted)
 
     def take_action(self, actions):
