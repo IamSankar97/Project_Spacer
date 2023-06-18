@@ -87,29 +87,20 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=
 
     x_coords, y_coords = np.array(np.round(x_coords).astype(int)), np.array(np.round(y_coords).astype(int))
 
-    x_coords_left, y_coords_left = np.add(x_coords, 1), y_coords
-    x_coords_right, y_coords_right = x_coords, np.add(y_coords, 1)
     if pair != 1 and space != 0:
-        # x_co, y_co = x_coords, y_coords
         offset = np.arange(pair)
         offset_space = np.linspace(0, space, len(offset))
         offset = offset + offset_space
         x_coords = np.repeat(x_coords, pair) + np.tile(offset, len(x_coords))
-        y_coords = np.repeat(y_coords, pair)  # + np.tile(offset, len(y_coords))
+        y_coords = np.repeat(y_coords, pair)
         x_coords, y_coords = x_coords.astype(int), y_coords.astype(int)
 
     mask = (x_coords < surface.shape[0]) & (y_coords < surface.shape[1])
-    # mask_left = (x_coords_left < surface.shape[0]) & (y_coords_left < surface.shape[1])
-    # mask_right = (x_coords_right < surface.shape[0]) & (y_coords_right < surface.shape[1])
     noise = np.random.uniform(low=-1e-7, high=1e-6, size=x_coords[mask].shape)
 
     # Add the noise to the height of the bump
     h_bump = h_defect + noise
-    # hup_l = h_up + noise
-    # hup_r = h_up - noise
     surface[x_coords[mask], y_coords[mask]] = h_bump
-    # surface[x_coords[mask_left], y_coords[mask_left]] = hup_l
-    # surface[x_coords[mask_right], y_coords[mask_right]] = hup_r
 
 
 class SpacerEnv(btb.env.BaseEnv):

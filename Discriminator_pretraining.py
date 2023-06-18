@@ -101,7 +101,7 @@ def get_image_dataloader(spacer_data_dir=None, shuffle=True):
     dataset = ImageFolder(root=spacer_data_dir, transform=transform)
 
     # Create the dataloader
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=100, shuffle=shuffle, )
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=50, shuffle=shuffle, )
 
     return dataloader
 
@@ -114,10 +114,10 @@ train_dataloader = get_image_dataloader(dir, shuffle=True)
 
 
 def main():
-    discriminator = resnet.resnet10(1, 2)
-    device = get_device('1')
+    discriminator = resnet.resnet18(1, 2)
+    device = get_device('0')
     discriminator = to_device(discriminator, device)
-    disc_device = get_device('1')
+    disc_device = get_device('0')
     dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
     disc_ls_epoch = []
     for epoch in range(100):

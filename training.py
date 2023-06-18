@@ -189,43 +189,44 @@ class Penv(gym.Env):
     def __init__(self, img_size, batch_size, episode_length, loss_weight, dat_dir, discriminator, lr_discriminator,
                  weight_decay, device_discriminator, train_discriminator, blender_add, blend_file):
         super(Penv, self).__init__()
+        self.img_size = img_size
+        self.batch_size = batch_size
+        self.episode_length = episode_length
         self.loss_weight = loss_weight
+        self.spacer_data_dir = dat_dir
+        self.train_disc = train_discriminator
+        self.discriminator = discriminator
+        self.dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr_discriminator, betas=(0.5, 0.999),
+                                              weight_decay=weight_decay)
+        self.disc_device = device_discriminator
+
+        self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, blend_file=blend_file,
+                                     real_time=False)
+        self.state = self.environments.reset()
+        self.action_space = spaces.Box(-1, 1, shape=(7,))
+        self.observation_space = spaces.Dict(self._get_obs_space())
         self.disc_train_epoch = 0
         self.target_gen_loss = 0
         self.target_disc_loss = 0
-        self.img_size = img_size
         self.disc_ls_epoch = []
-        self.disc_ls = None
-        self.disc_rl_score = None
-        self.disc_fk_score = None
+        self.disc_ls = 0
+        self.disc_rl_score = 0
+        self.disc_fk_score = 0
         self.done = False
         self.x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
                     28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
         self.y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
                     18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
-        self.spacer_data_dir = dat_dir
-        self.discriminator = discriminator
-        self.disc_device = device_discriminator
-        self.train_disc = train_discriminator
-        self.dic_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr_discriminator, betas=(0.5, 0.999),
-                                              weight_decay=weight_decay)
-        self.environments = gym.make("blendtorch-spacer-v2", address=blender_add, blend_file=blend_file,
-                                     real_time=False)
-        logging.basicConfig(filename=train_log, level=logging.INFO)
-        self.environments.reset()
-        self.action_paired = {}
-        # logging must be after environment generation
-        self.action_space = spaces.Box(-1, 1, shape=(7,))
-        self.observation_space = spaces.Dict(self._get_obs_space())
+
+        logging.basicConfig(filename=train_log, level=logging.INFO)  # logging must be done after environment generation
+
         self.actual_dataloader = self.get_image_dataloader()
-        # derived by calculating avg value over all the available fake images of shape 64*64
+        # derived by calculating avg value over all the available real images of shape 128*128
         self.brightness_threshold = np.array([0.85, 0.30])
         self.mean_brightness = torch.mean(to_device(torch.from_numpy(self.brightness_threshold),
                                                     device=self.disc_device))
         # spacer data
-        self.state = None
         self.spacer_data = os.listdir(self.spacer_data_dir)
-        self.episode_length = episode_length
         self.time_step = -1
         self.episodes = 0
         self.epoch = 0
@@ -233,7 +234,7 @@ class Penv(gym.Env):
         self.disc_fake_score = 0
         self.disc_real_score = 0
         self.discriminator_loss = 0
-        self.batch_size = batch_size
+        self.action_paired = {}
         self.generator_loss_mean = []
         self.l1_loss_mean = []
         self.generator_loss = []
@@ -243,7 +244,7 @@ class Penv(gym.Env):
         self.buffer_fake_spacer = deque(maxlen=self.episode_length)
         self.disc_buffer_act_spacer = deque(maxlen=self.episode_length * 10)
         self.disc_buffer_fake_spacer = deque(maxlen=self.episode_length * 10)
-        # self.initialize_discriminator()
+        self.initialize_discriminator()
 
     def train_discriminator(self, real_images, fake_images, clip=False):
         # Clear discriminator gradients
@@ -373,8 +374,9 @@ class Penv(gym.Env):
             ortho_actions = pd.DataFrame(get_orth_actions(self.action_space.shape[0]))
             noise_std, theta, dt = 0.12, 0.15, 1e-2
 
-            self.disc_ls_epoch = []
-            while True:
+            self.disc_ls_epoch = [0]
+            if not (is_loss_stagnated(self.disc_ls_epoch, window_size=10, threshold=1e-3) or
+                    np.mean(self.disc_ls) < self.target_disc_loss):
                 self.disc_fk_score, self.disc_rl_score, self.disc_ls = [], [], []
                 for _ in range(self.batch_size):  # episode_length = completing 1 epoch
                     #   Take action and collect observations
@@ -386,7 +388,7 @@ class Penv(gym.Env):
                     actual_spacer, fake_spacer, info = self.get_data(noisy_action)
                     fake_spacer = self.match_obs_space(fake_spacer)
 
-                    actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255.0
+                    actual_spacer, fake_spacer = actual_spacer/255.0, fake_spacer / 255.0
 
                     actual_spacer = to_device(actual_spacer, self.disc_device)
                     fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), self.disc_device)
@@ -406,17 +408,13 @@ class Penv(gym.Env):
 
                 self.epoch += 1
                 self.disc_ls_epoch.append(np.mean(self.disc_ls))
-
-                if is_loss_stagnated(self.disc_ls_epoch, window_size=10, threshold=1e-3) or \
-                        np.mean(self.disc_ls) < self.target_disc_loss:
-                    print('stopping disc training as discriminator_loss has stagnated or target ls reached')
-                    break
+            else:
+                print('stopping disc training as discriminator_loss has stagnated or target ls reached')
 
             torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR,
                                                         'Resnet_disc_model_{}_{}.pth'.format('pretrain', self.epoch)))
 
     def get_state(self, fake_spacer, scalar=False):
-
         obs_imgs = np.expand_dims(fake_spacer, axis=-1)
         if scalar:
             obs_imgs = OrderedDict(zip(list(self.observation_space.spaces.keys())[:-1], obs_imgs))
@@ -452,7 +450,7 @@ class Penv(gym.Env):
         #   Take action and collect observations
         actual_spacer, fake_spacer, info = self.get_data(action)
 
-        self.avg_brightness = np.array(np.mean(fake_spacer, axis=(0, 1, 2)) / 255)
+        self.avg_brightness = np.array(np.mean(fake_spacer, axis=(0, 1, 2)) / 255.0)
 
         #   Get state for RL
         fake_spacer = self.match_obs_space(fake_spacer)
@@ -506,8 +504,6 @@ class Penv(gym.Env):
                 break_outer_loop = False
                 while True:
                     self.epoch += 1
-                    #   Generate a random permutation of indices along the second dimension
-                    # same indices for both actual and real spacer
                     indices0 = torch.randperm(buffer_act_spacer.size(1), device=device)
                     indices1 = torch.randperm(buffer_fake_spacer.size(1), device=device)
                     #   Use the index_select function to shuffle the tensor along the second dimension
@@ -582,7 +578,7 @@ def parse_arguments():
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
     parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
-    parser.add_argument('--retrain_disc', type=bool, default=False, help='Discriminator device')
+    parser.add_argument('--retrain_disc', type=bool, default=True, help='Discriminator training')
 
     parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
@@ -595,49 +591,45 @@ def parse_arguments():
 
 def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epochs, lr_discriminator, weight_decay,
          device_discriminator, retrain_disc, lr_generator, total_steps, device_generator, blender_add, blend_file):
-    # * 34  # Roll_out Buffer Size/ How many steps in an episode*50
+
     episode_length = batch_size * batches_in_episode
+    print("batch_size:", batch_size, 'episode_length:', episode_length)
 
     device_0 = get_device('{}'.format(device_discriminator))
     device_1 = get_device('{}'.format(device_generator))
-    disc_file = '/home/mohanty/PycharmProjects/train_logs_disc/spacer2023-04-14 ' \
-                '02:14:14/PPO_model/Resnet_disc_model_pretrain_4.pth'
-    discriminator = torch.load(disc_file)
-    discriminator = to_device(discriminator, device_0)
+    if retrain_disc:
+        # Discriminator will be trained on fly
+        discriminator = resnet.resnet18(1, 2)
+    else:
+        # Discriminator will be trained on fly
+        disc_file = '/home/mohanty/PycharmProjects/train_logs_disc/spacer2023-04-14 ' \
+                    '02:14:14/PPO_model/Resnet_disc_model_pretrain_4.pth'
+        discriminator = torch.load(disc_file)
+        writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=6)
     writer.add_text("hyper_parameters", "disc_model: " + str(discriminator.model_name), global_step=6)
-    writer.add_text("hyper_parameters", "disc_model: " + disc_file, global_step=6)
-    print("batch_size:", batch_size, 'episode_length:', episode_length)
+    discriminator = to_device(discriminator, device_0)
 
     py_env = Monitor(Penv(img_size=img_size, batch_size=batch_size, episode_length=episode_length,
                           loss_weight=loss_weight, dat_dir=data_dir, discriminator=discriminator,
                           lr_discriminator=lr_discriminator, weight_decay=weight_decay, device_discriminator=device_0,
                           train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file))
-    # obs = Py_env.reset()
-    # sample_obs = Py_env.observation_space.sample()
-    # env_checker.check_env(Py_env,  warn=True)
+
     policy_kwargs = dict(net_arch=dict(pi=[200, 100, 100], vf=[200, 100, 100]),
                          features_extractor_class=CustomImageExtractor)
 
     logging_callback = TrainAndLoggingCallback(check_freq=episode_length, save_path=CHECKPOINT_DIR)
 
-    # Separate evaluation env
-    # Stop training if there is no improvement after more than 3 evaluations
-    # stop_train_callback = StopTrainingOnNoModelImprovement(max_no_improvement_evals=3, min_evals=2, verbose=1)
-    # #   Evaluate the call back every 3000 steps
-    # eval_callback = EvalCallback(py_env, eval_freq=2, callback_after_eval=stop_train_callback, verbose=1)
-
     new_logger = configure(LOG_DIR, ["stdout", "csv", "tensorboard"])
 
     model = PPO('MultiInputPolicy', py_env, tensorboard_log=LOG_DIR, verbose=1, learning_rate=lr_generator,
                 batch_size=batch_size, n_steps=episode_length, n_epochs=n_epochs, clip_range=.1, gamma=.95,
-                gae_lambda=.9,
-                policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
+                gae_lambda=.9, policy_kwargs=policy_kwargs, seed=seed_, device=device_1)
 
     model.set_logger(new_logger)
 
-    #   Multi-processed RL Training
     model.learn(total_timesteps=total_steps, callback=logging_callback, log_interval=1, tb_log_name="first_run",
                 reset_num_timesteps=False)
+
     model.save(FINAL_MODEL_DIR + '{}'.format(total_steps))
     torch.save(discriminator, FINAL_MODEL_DIR + '{}'.format(total_steps) + 'resnet.pth')
     writer.close()
