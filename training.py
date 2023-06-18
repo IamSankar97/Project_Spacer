@@ -207,9 +207,9 @@ class Penv(gym.Env):
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.disc_train_epoch = 0
         self.target_gen_loss = 0
-        self.target_disc_loss = 0
+        self.target_disc_loss = 0.1
         self.disc_ls_epoch = []
-        self.disc_ls = 0
+        self.disc_ls = 1
         self.disc_rl_score = 0
         self.disc_fk_score = 0
         self.done = False
@@ -375,7 +375,7 @@ class Penv(gym.Env):
             noise_std, theta, dt = 0.12, 0.15, 1e-2
 
             self.disc_ls_epoch = [0]
-            if not (is_loss_stagnated(self.disc_ls_epoch, window_size=10, threshold=1e-3) or
+            while not (is_loss_stagnated(self.disc_ls_epoch, window_size=10, threshold=1e-3) or
                     np.mean(self.disc_ls) < self.target_disc_loss):
                 self.disc_fk_score, self.disc_rl_score, self.disc_ls = [], [], []
                 for _ in range(self.batch_size):  # episode_length = completing 1 epoch
@@ -408,8 +408,8 @@ class Penv(gym.Env):
 
                 self.epoch += 1
                 self.disc_ls_epoch.append(np.mean(self.disc_ls))
-            else:
-                print('stopping disc training as discriminator_loss has stagnated or target ls reached')
+
+            print('stopping disc training as discriminator_loss has stagnated or target ls reached')
 
             torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR,
                                                         'Resnet_disc_model_{}_{}.pth'.format('pretrain', self.epoch)))
@@ -435,9 +435,8 @@ class Penv(gym.Env):
         return self.state
 
     def step(self, action):
-        device = self.disc_device
+        # device = self.disc_device
         #   Update and reset attributes
-        global break_outer_loop
         self.steps += 1
         self.reward = 0
         self.time_step += 1
@@ -458,8 +457,8 @@ class Penv(gym.Env):
 
         #   Calculate loss that is l1_loss and cross_entropy
         actual_spacer, fake_spacer = actual_spacer / 255.0, fake_spacer / 255.0
-        actual_spacer, fake_spacer = to_device(actual_spacer, device), to_device(torch.from_numpy(fake_spacer.copy())
-                                                                                 .unsqueeze(1).float(), device)
+        actual_spacer, fake_spacer = to_device(actual_spacer, self.disc_device), \
+            to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), self.disc_device)
 
         self.l1_loss = torch.mean(torch.abs(fake_spacer - actual_spacer)).detach().cpu().numpy().item()
 
@@ -468,11 +467,11 @@ class Penv(gym.Env):
         with torch.no_grad():
             preds = self.discriminator(fake_spacer)
         #   Fake is termed as real to fool the discriminator
-        targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(), device)
+        targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(), self.disc_device)
 
         self.cross_entropy = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
         self.generator_acc = torchmetrics.functional.accuracy(preds, targets, task='binary').cpu().numpy().item()
-
+        print("acc:", self.generator_acc)
         #   Calculate Reward
         self.reward = -self.cross_entropy - self.loss_weight * (100 * self.l1_loss)
 
@@ -480,11 +479,12 @@ class Penv(gym.Env):
         self.generator_loss_mean.append(self.cross_entropy)
         self.l1_loss_mean.append(self.l1_loss)
         self.avg_brightness_mean.append(self.avg_brightness)
-        self.done = self.chk_termination()
+
         if self.train_disc:
             self.disc_buffer_act_spacer.append(actual_spacer)
             self.disc_buffer_fake_spacer.append(fake_spacer)
 
+        self.done = self.chk_termination()
         if self.done:
             self.generator_loss.append(np.mean(self.generator_loss_mean))
             print('\033[1mgen_acc_mean:', np.mean(self.generator_acc_mean), 'target_gen&disc_ls', self.target_gen_loss,
@@ -493,19 +493,22 @@ class Penv(gym.Env):
         #   Collect Data's in lists if Discriminator is to be retrained.
         if self.done and self.train_disc:
             self.target_gen_loss = 1 * math.exp(-self.disc_train_epoch / 10)
+
             #   Discriminator Training
-            if (self.done and self.generator_loss[-1] < self.target_gen_loss) \
-                    or is_loss_stagnated(self.generator_loss):
+            # if (self.done and self.generator_loss[-1] < self.target_gen_loss) \
+            #         or is_loss_stagnated(self.generator_loss):
+            if True:
                 self.disc_train_epoch += 1
                 self.target_disc_loss = 1 * math.exp(-self.disc_train_epoch / 10)
 
                 buffer_act_spacer = torch.stack(list(self.disc_buffer_act_spacer))
                 buffer_fake_spacer = torch.stack(list(self.disc_buffer_fake_spacer))
-                break_outer_loop = False
-                while True:
+
+                while not is_loss_stagnated(self.disc_ls_epoch, window_size=self.episode_length * 2,
+                                         threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
                     self.epoch += 1
-                    indices0 = torch.randperm(buffer_act_spacer.size(1), device=device)
-                    indices1 = torch.randperm(buffer_fake_spacer.size(1), device=device)
+                    indices0 = torch.randperm(buffer_act_spacer.size(1), device=self.disc_device)
+                    indices1 = torch.randperm(buffer_fake_spacer.size(1), device=self.disc_device)
                     #   Use the index_select function to shuffle the tensor along the second dimension
                     buffer_act_spacer, buffer_fake_spacer = torch.index_select(buffer_act_spacer, 1, indices0), \
                         torch.index_select(buffer_fake_spacer, 1, indices1)
@@ -530,20 +533,15 @@ class Penv(gym.Env):
                          'dict_fk_score': np.mean(self.disc_fk_score)}, category='disc_perf',
                         step=self.epoch)
 
-                    if is_loss_stagnated(self.disc_ls_epoch, window_size=self.episode_length * 2,
-                                         threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
-                        print('\033[stopping disc training as discriminator_loss has stagnated'
-                              ' or disc_loss{} < target{}'.format(np.mean(self.disc_ls), self.target_disc_loss),
-                              '\033[0m')
-                        break
+                print('\033[stopping disc training as discriminator_loss has stagnated'
+                      ' or disc_loss{} < target{}'.format(np.mean(self.disc_ls), self.target_disc_loss),
+                      '\033[0m')
 
-                    self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(self.disc_ls), \
-                        np.mean(self.disc_rl_score), np.mean(self.disc_fk_score)
+                self.discriminator_loss, self.disc_real_score, self.disc_fake_score = np.mean(self.disc_ls), \
+                    np.mean(self.disc_rl_score), np.mean(self.disc_fk_score)
 
-                    torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR, 'Resnet_disc_model_{}_ep{}.pth'.format(
-                        self.time_step, self.epoch)))
-
-                # self.target_gen_loss = self.target_gen_loss * math.exp(-self.disc_train_epoch*10)
+                torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR, 'Resnet_disc_model_{}_ep{}.pth'.format(
+                    self.time_step, self.epoch)))
 
             #   Logging when discriminator trains
             log_info = self.get_attributes(['time_step', 'episodes', 'steps', 'l1_loss', 'cross_entropy',
@@ -571,11 +569,11 @@ def parse_arguments():
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
     parser.add_argument('--batch_size', type=int, default=6, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=84, help='Episode length = batch_size * '
-                                                                           'batches_in_episode')
+                                                                          'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=20, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
-    parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
+    parser.add_argument('--lr_discriminator', type=float, default=0.0001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
     parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
     parser.add_argument('--retrain_disc', type=bool, default=True, help='Discriminator training')
@@ -600,7 +598,7 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
         # Discriminator will be trained on fly
         discriminator = resnet.resnet18(1, 2)
     else:
-        # Discriminator will be trained on fly
+        # Pre-trained Discriminator is used
         disc_file = '/home/mohanty/PycharmProjects/train_logs_disc/spacer2023-04-14 ' \
                     '02:14:14/PPO_model/Resnet_disc_model_pretrain_4.pth'
         discriminator = torch.load(disc_file)

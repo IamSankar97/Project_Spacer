@@ -299,11 +299,15 @@ class SpacerEnv(btb.env.BaseEnv):
         return action_inverse_normalized
 
     def generate_spacer_assign_mat(self):
-        self.dfct_statics = self.get_sample_surface(with_defect=not self.training, return_statistics=not self.training)
-        self.spacer_s.get_spacer_point_co()
-        self.vertices = self.spacer_s.point_coo
-        self.generate_polygon()
-        if not self.training:
+        if self.training:
+            self.spacer = bpy.data.objects['spacer_ring_train.64']
+
+        else:
+            self.dfct_statics = self.get_sample_surface(with_defect=not self.training,
+                                                        return_statistics=not self.training)
+            self.spacer_s.get_spacer_point_co()
+            self.vertices = self.spacer_s.point_coo
+            self.generate_polygon()
             self.get_defect_mask()
         self.update_scene()
 
@@ -311,13 +315,15 @@ class SpacerEnv(btb.env.BaseEnv):
         self.step += 1
         self.total_step += 1
         self.take_action(actions)
-        dfct_statics = self.get_sample_surface(with_defect=not self.training, return_statistics=not self.training)
+
         if not self.training:
+            dfct_statics = self.get_sample_surface(with_defect=not self.training, return_statistics=not self.training)
+
             new_row = pd.DataFrame(dfct_statics, columns=self.df_stats.columns)
             self.df_stat.append(new_row)
-        self.spacer_s.get_spacer_point_co()
-        self.vertices = self.spacer_s.point_coo
-        self.update_mesh_back_ground()
+            self.spacer_s.get_spacer_point_co()
+            self.vertices = self.spacer_s.point_coo
+            self.update_mesh_back_ground()
 
     def _env_reset(self):
         # global dummy_actions
