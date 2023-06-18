@@ -20,13 +20,12 @@ import csv
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# import torchvision
+import torchvision
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv
 import datetime
 import logging
 import torchmetrics
@@ -86,13 +85,7 @@ def get_attribute_dict(*args):
     return attr_dict
 
 
-x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
-            28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
-y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
-            18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
-
-
-def sliding_window(image, size, stride):
+def sliding_window(image, size, stride, x_128_64, y_128_64):
     windows = view_as_windows(image, size, step=stride)
     result_windows = windows[y_128_64, x_128_64]
     return result_windows
@@ -142,54 +135,41 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         This corresponds to the number of unit for the last layer.
     """
 
-    def __init__(self, observation_space, features_dim: int = 512, scalar=False):
+    def __init__(self, observation_space, features_dim: int = 512):
         super().__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space['0image'].shape[0]
-        self.scalar = scalar
         self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-2]).extend(
             [torch.nn.Flatten()])
 
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten_img = self.cnn(torch.as_tensor(observation_space['0image'].sample()[None]).float()).shape[1]
-        if self.scalar:
-            self.n_scalar = observation_space['scalar'].shape[0]
-            self.n_img = len(observation_space.spaces) - self.n_scalar
-            self.dropout0 = nn.Dropout(p=0.3)
-            self.linear0 = nn.Linear(n_flatten_img, 100)
-            self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
-            self.dropout1 = nn.Dropout(p=0.3)
-            self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
-
-        else:
+        # if self.scalar:
+        #     self.n_img = len(observation_space.spaces)
+        #     self.dropout0 = nn.Dropout(p=0.3)
+        #     self.linear0 = nn.Linear(n_flatten_img, 100)
+        #     self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
+        #     self.dropout1 = nn.Dropout(p=0.3)
+        #     self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
+        #
+        # else:
             self.n_img = len(observation_space.spaces)
-            # self.dropout0 = nn.Dropout(p=0.2)
             self.linear0 = nn.Linear(n_flatten_img, 100)
             self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
-            # self.dropout1 = nn.Dropout(p=0.2)
             self.linear2 = nn.Linear(features_dim * 3, features_dim)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        if self.scalar:
-            scalar_obs = observations['scalar']
-            del observations['scalar']
-
         img_features = []
         for _, value in observations.items():
             cnn_output = self.cnn(value)
-            # cnn_output = self.dropout0(cnn_output)
             linear0 = torch.relu(self.linear0(cnn_output))
             img_features.append(linear0)
-            # cnn_reshape = torch.reshape(cnn_output, (img_obs.shape[0], self.select_crops.size()[0], cnn_output.shape[1]))
 
         cnn_output = torch.cat(img_features, dim=1)
         x = torch.relu(self.linear1(cnn_output))
-        # x = self.dropout1(x)
         out_features = torch.relu(self.linear2(x))
-        if self.scalar:
-            out_features = torch.cat((x, scalar_obs), dim=-1)
 
         return out_features
 
@@ -207,8 +187,7 @@ class CustomDataset(torch.utils.data.Dataset):
 
 class Penv(gym.Env):
     def __init__(self, img_size, batch_size, episode_length, loss_weight, dat_dir, discriminator, lr_discriminator,
-                 weight_decay,
-                 device_discriminator, train_discriminator, blender_add, blend_file):
+                 weight_decay, device_discriminator, train_discriminator, blender_add, blend_file):
         super(Penv, self).__init__()
         self.loss_weight = loss_weight
         self.disc_train_epoch = 0
@@ -220,6 +199,10 @@ class Penv(gym.Env):
         self.disc_rl_score = None
         self.disc_fk_score = None
         self.done = False
+        self.x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
+                    28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
+        self.y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
+                    18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
         self.spacer_data_dir = dat_dir
         self.discriminator = discriminator
         self.disc_device = device_discriminator
@@ -232,7 +215,7 @@ class Penv(gym.Env):
         self.environments.reset()
         self.action_paired = {}
         # logging must be after environment generation
-        self.action_space = spaces.Box(-1, 1, shape=(5,))
+        self.action_space = spaces.Box(-1, 1, shape=(7,))
         self.observation_space = spaces.Dict(self._get_obs_space())
         self.actual_dataloader = self.get_image_dataloader()
         # derived by calculating avg value over all the available fake images of shape 64*64
@@ -240,7 +223,7 @@ class Penv(gym.Env):
         self.mean_brightness = torch.mean(to_device(torch.from_numpy(self.brightness_threshold),
                                                     device=self.disc_device))
         # spacer data
-        self.state = [32]
+        self.state = None
         self.spacer_data = os.listdir(self.spacer_data_dir)
         self.episode_length = episode_length
         self.time_step = -1
@@ -340,7 +323,8 @@ class Penv(gym.Env):
             patches = []
             for image in images:
                 image = np.asarray(image)
-                patches.append(sliding_window(image, size=128, stride=64))
+                patches.append(sliding_window(image, size=128, stride=64, x_128_64=self.x_128_64,
+                                              y_128_64=self.y_128_64))
             patches = torch.from_numpy(patches[0]).unsqueeze(1).float()
             labels = torch.tensor(labels).repeat_interleave(patches.size(0) // len(labels))
             return patches, labels
@@ -402,7 +386,7 @@ class Penv(gym.Env):
                     actual_spacer, fake_spacer, info = self.get_data(noisy_action)
                     fake_spacer = self.match_obs_space(fake_spacer)
 
-                    actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255
+                    actual_spacer, fake_spacer = actual_spacer, fake_spacer / 255.0
 
                     actual_spacer = to_device(actual_spacer, self.disc_device)
                     fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), self.disc_device)
@@ -474,9 +458,8 @@ class Penv(gym.Env):
         fake_spacer = self.match_obs_space(fake_spacer)
         self.state = self.get_state(fake_spacer)
 
-        #   Check if the action has failed
         #   Calculate loss that is l1_loss and cross_entropy
-        actual_spacer, fake_spacer = actual_spacer / 255, fake_spacer / 255
+        actual_spacer, fake_spacer = actual_spacer / 255.0, fake_spacer / 255.0
         actual_spacer, fake_spacer = to_device(actual_spacer, device), to_device(torch.from_numpy(fake_spacer.copy())
                                                                                  .unsqueeze(1).float(), device)
 
@@ -486,7 +469,7 @@ class Penv(gym.Env):
         self.discriminator.eval()
         with torch.no_grad():
             preds = self.discriminator(fake_spacer)
-        #   Fake is termed as real
+        #   Fake is termed as real to fool the discriminator
         targets = to_device(torch.tensor([[1, 0] for _ in range(preds.size(0))]).float(), device)
 
         self.cross_entropy = F.binary_cross_entropy(preds, targets).detach().cpu().numpy().item()
@@ -592,9 +575,9 @@ def parse_arguments():
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
     parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
-                                                                            'batches_in_episode')
+                                                                          'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
-    parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
+    parser.add_argument('--n_epochs', type=int, default=20, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.00001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
@@ -602,10 +585,10 @@ def parse_arguments():
     parser.add_argument('--retrain_disc', type=bool, default=False, help='Discriminator device')
 
     parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
-    parser.add_argument('--total_steps', type=int, default=100000, help='Total steps for PPO to be trained')
+    parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
     parser.add_argument('--blender_add', type=int, default=51, help='Blendtorch launcher address')
-    parser.add_argument('--blend_file', type=str, default='spacer1_normal_22.6_exp_no_mesh_6action2-only_mat.blend',
+    parser.add_argument('--blend_file', type=str, default='spacer_musgrave_and_white_texture_mix.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
 

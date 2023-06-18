@@ -17,7 +17,6 @@ class Spacer:
         thickness: thickness of spacer # originally 3.222
         '''
 
-        # originally, outer_radius = 16
         self.h_defect = None
         self.grid_spacing = grid_spacing
         self.grid_radius = outer_radius + self.grid_spacing

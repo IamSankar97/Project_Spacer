@@ -1,54 +1,135 @@
-# # Use below only during debugging
+# # Use below during debugging
 # import pydevd_pycharm
 # pydevd_pycharm.settrace('localhost', port=1234, stdoutToServer=True, stderrToServer=True)
 
+import bpy
+import bmesh
+import time
+import multiprocessing
 import sys
 import os
-
 from skimage.util import view_as_windows
-
-sys.path.append(os.getcwd())
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
-sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
-
-import bpy
-import time
-import bmesh
-import cv2
+import warnings
 from PIL import Image
-import colorsys
 import numpy as np
-import pickle
 import pandas as pd
 import random
 from blendtorch import btb
 from spacer import Spacer
 import datetime
-from img_processing import remove_back_ground
-from utils import augument, get_circular_corps, get_no_defect_crops
+from utils import pol2cart, get_theta
 
+sys.path.append(os.getcwd())
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs')
+sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/')
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+
+def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=1, space=0):
+    '''
+
+    Parameters
+    ----------
+    surface
+    grid_spacing
+    r0
+    r1
+    scratch_length
+    theta0
+    alpha
+    width: width of scratch interms of coordinates. if width = 2, defect width = 2*grid spacing
+
+    Returns
+    -------
+
+    '''
+    beta = random.choice([70, 80])
+    alpha = random.choice([35, 40])
+
+    # Convert to meter
+    r0, r1, scratch_length = r0 * 1e-3, r1 * 1e-3, scratch_length * 1e-3
+    if scratch_length < abs(r0 - r1):
+        r1 = r0 + scratch_length
+        warnings.warn(
+            "defect length is smaller than asked radius boundary, r1 is adjusted to meet the scratch_length")
+
+    #   Defect grove height and depth from mean surface
+    h_up, h_total = grid_spacing / np.tan(np.radians(alpha)), \
+                    grid_spacing / np.tan(np.radians(beta))
+
+    h_defect = h_total - h_up
+    if h_defect >= 0:
+        h_defect = -0.00001
+
+    #   Calculating start and end coordinate of defects in terms of grid points
+    x0, y0 = pol2cart(r0, np.radians(theta0))
+    x1, y1 = pol2cart(r1, get_theta(r0, r1, theta0, scratch_length))
+
+    # convert coordinates in meters to grid points
+    def_co = np.array([x0, y0, x1, y1]) / grid_spacing
+    def_co += surface.shape[0] * 0.5
+    def_co = def_co.astype(int)
+    x0, y0, x1, y1 = def_co
+
+    # Calculate the distances and angles between start and end points
+    dx, dy = x1 - x0, y1 - y0
+    distance = np.sqrt(dx ** 2 + dy ** 2)
+    angle = np.arctan2(dy, dx)
+    sin_angle, cos_angle = np.sin(angle), np.cos(angle)
+
+    # Calculate the number of grid points along the line
+    num_points = int(distance / grid_spacing)
+    x_points, y_points = np.full(num_points, x0), np.full(num_points, y0)
+
+    indices = np.arange(num_points)
+    x_coords = x_points + (indices * grid_spacing * cos_angle)
+    y_coords = y_points + (indices * grid_spacing * sin_angle)
+
+    x_coords, y_coords = np.array(np.round(x_coords).astype(int)), np.array(np.round(y_coords).astype(int))
+
+    x_coords_left, y_coords_left = np.add(x_coords, 1), y_coords
+    x_coords_right, y_coords_right = x_coords, np.add(y_coords, 1)
+    if pair != 1 and space != 0:
+        # x_co, y_co = x_coords, y_coords
+        offset = np.arange(pair)
+        offset_space = np.linspace(0, space, len(offset))
+        offset = offset + offset_space
+        x_coords = np.repeat(x_coords, pair) + np.tile(offset, len(x_coords))
+        y_coords = np.repeat(y_coords, pair)  # + np.tile(offset, len(y_coords))
+        x_coords, y_coords = x_coords.astype(int), y_coords.astype(int)
+
+    mask = (x_coords < surface.shape[0]) & (y_coords < surface.shape[1])
+    # mask_left = (x_coords_left < surface.shape[0]) & (y_coords_left < surface.shape[1])
+    # mask_right = (x_coords_right < surface.shape[0]) & (y_coords_right < surface.shape[1])
+    noise = np.random.uniform(low=-1e-7, high=1e-6, size=x_coords[mask].shape)
+
+    # Add the noise to the height of the bump
+    h_bump = h_defect + noise
+    # hup_l = h_up + noise
+    # hup_r = h_up - noise
+    surface[x_coords[mask], y_coords[mask]] = h_bump
+    # surface[x_coords[mask_left], y_coords[mask_left]] = hup_l
+    # surface[x_coords[mask_right], y_coords[mask_right]] = hup_r
 
 
 class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
         super().__init__(agent)
-        self.action_inverted = None
-        self.action_pair = None
-        self.spacer = bpy.data.objects["spacer_ring"]
+        self.training = True    # If training true defect data and it's mask image is not generated.
+        # Sapcer Dimesnions
+        self.outer_radius = 16 * 1e-3
+        self.thickness = 3.222 * 1e-3
+        self.grid_spacing = 0.00001  # 1e-6
+        self.grid_radius = self.outer_radius + self.grid_spacing
+        self.grid_dim = int(self.grid_radius / self.grid_spacing) * 2
+
         self.camera = bpy.data.objects["Camera"]
+        self.camera.location = (0.0, 0.0, 0.15)
         self.light0 = bpy.data.objects["L0_top"]
+        self.light0.location = (0.0, 0.0, 0.15)
+
         self.episodes, self.step, self.total_step = -2, 0, 0
-        # self.light1 = bpy.data.objects["L1_0"]
-        # self.light1 = bpy.data.objects["L2_240"]
-        self.img_addr = 'spacer_gym/spacer_env_render/image_spacer.png'
-        # Note, ensure that physics run at same speed.
-        self.fps = bpy.context.scene.render.fps
-        self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
-        self.avg_pixel = 30
-        self.np_random = None
-        self.state = 40
-        self.vertices = None
+
         self.topology_dir = '/home/mohanty/PycharmProjects/Data/pkl_6/'
         self.g_time_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.topologies = os.listdir(self.topology_dir)
@@ -57,32 +138,31 @@ class SpacerEnv(btb.env.BaseEnv):
 
         self.y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
                          18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
+
+        # Action Space
         #   (3)
-        self.action_Material = {'specular': [0.3, 0.7], 'ior': [2, 2.6], 'roughness': [0, 0.5]}
+        self.action_Material = {'roughness': [0, 0.5], 'specular': [0, 0.5], 'ior': [2, 2.5]}
         #   (1)
-        self.action_mix = {'Factor': [0.0, 0.4]}
-        #   (1)
-        self.action_light_cmn = {"value": [0.8, 1]}
-        #   (4)
-        self.action_light = {'energy0': [0.001, 0.015], 'Spread': [1.309, 1.8326], 'ro_x': [0, 0.296],
-                             'ro_y': [0, 0.296]}
-        #   (2)
-        self.action_clr_ramp = {'Pos_black': [0, 0.3], 'Pos_white': [0.7, 1]}
-        # Total = 11
-
-        self.initial_action = pd.read_csv('/home/mohanty/PycharmProjects/Scribed '
-                                          'PPO_1light/spacer_gym/envs/initial_act_Less_then4.csv', header=None)
-        self.ortho_actions = pd.read_csv('/home/mohanty/PycharmProjects/Scribed '
-                                         'spacer_1light/spacer_gym/envs/ortho1.csv', header=None)
-
-        self.reset_action = {'specular': 0.5, 'ior': 2.3, 'roughness': 0.2, 'factor': 0.1, "value": 0.8,
-                             'energy0': 0.005, 'Spread': 1.5708, 'ro_x': 0, 'ro_y': 0, 'Pos_black': 0.225,
-                             'Pos_white': 0.9, 'ro_z': 0}
-        self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light_cmn, **self.action_light,
-                             **self.action_clr_ramp}
+        self.action_mix = {'Factor': [0.0, 0.3]}
+        #   (3)
+        self.action_light = {'energy0': [0.02, 0.18], 'ro_x': [-0.45, 0.45], 'ro_y': [-0.45, 0.45]}
+        # Total = 5
+        self.reset_action = {'specular': 0.2, 'ior': 2.3, 'roughness': 0.1, 'factor': 0.05, "value": 0.8,
+                             'energy0': 0.01, 'ro_x': 0, 'ro_y': 0}
+        self.action_bound = {**self.action_Material, **self.action_mix, **self.action_light}
         self.action_keys = list(self.action_bound.keys())
-        self.update_scene()
-        time.sleep(5)
+
+        self.state = None
+        self.vertices = None
+        self.def_spacer = not self.training
+        self.action_inverted = None
+        self.action_pair = None
+
+        self.generate_spacer_assign_mat()
+        self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
+        self.df_stats = pd.DataFrame(columns=['r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
+        self.df_stat = []
+
 
     def update_scene(self):
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
@@ -91,6 +171,85 @@ class SpacerEnv(btb.env.BaseEnv):
         for vertice_old, vertice_new in chunk:
             if vertice_old.co.z != 1:
                 vertice_old.co.z = vertice_new[2]
+
+    def generate_polygon(self, spacer_mesh_name: str = 'spacer_ring', smoothing: bool = 0):
+        """
+        Parameters
+        ----------
+        spacer_mesh_name
+        def_mesh_name
+        smoothing
+
+        Returns
+        -------
+        """
+
+        #   ********* Assuming we have a rectangular grid *************
+        x_diff = np.diff(self.vertices[:, 0])
+        x_change_idx = np.nonzero(x_diff)[0][0] + 1
+        self.xSize = x_change_idx
+        self.Size = len(self.vertices) // self.xSize
+
+        #   Generate the polygons (four vertices linked in a face)
+        polygons = []
+        for i in range(1, len(self.vertices) - self.xSize):
+            poly_set = np.array([self.vertices[i][2], self.vertices[i - 1][2], self.vertices[i - 1 + self.xSize][2],
+                                 self.vertices[i + self.xSize][2]])
+            # collecting spacer and defect polygons
+            if i % self.xSize != 0 and self.vertices[i][2] != 1 and np.all(poly_set != 1):
+                polygons.append((i, i - 1, i - 1 + self.xSize, i + self.xSize))
+
+        mesh = bpy.data.meshes.new(spacer_mesh_name)  # Create the mesh (inner data)
+        obj = bpy.data.objects.new(spacer_mesh_name, mesh)  # Create an object
+        obj.data.from_pydata(self.vertices, [], polygons)  # Associate vertices and polygons
+
+        if smoothing:
+            for p in obj.data.polygons:  # Set smooth shading (if needed)
+                p.use_smooth = True
+
+        bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+        self.spacer = bpy.data.objects[spacer_mesh_name]
+        self.spacer.location = (0.0, 0.0, 0.0)
+
+        self.material = bpy.data.materials.get("spacer")
+
+        # Assign the material to the object
+        self.spacer.active_material = self.material
+        bpy.context.view_layer.objects.active = self.spacer
+        self.spacer.select_set(True)
+
+    def get_defect_mask(self, def_mesh_name: str = 'spacer_defect'):
+
+        # create an array of indices for each polygon
+        indices = np.arange(1, len(self.vertices) - self.xSize)
+        # create an array of vertices for each polygon
+        vertices = np.array([indices, indices - 1, indices - 1 + self.xSize, indices + self.xSize]).T
+        # create a boolean mask for the defect polygons
+        mask = (indices % self.xSize != 0) & (self.vertices[indices, 2] != 1) & (self.vertices[indices, 2] != 0)
+        # create a boolean mask for the polygons with defects
+        poly_set = self.vertices[vertices[:, :], 2]
+
+        mask = mask & np.all(poly_set != 1, axis=1) & np.any((-1 <= poly_set) & (poly_set != 0), axis=1)
+        # filter the indices using the mask
+        polygons_def = vertices[mask, :].tolist()
+
+        collection = bpy.context.scene.collection
+
+        # Unlink the object from the collection
+        if self.def_spacer:
+            collection.objects.unlink(self.def_spacer)
+            # Remove the object from the scene
+            bpy.data.objects.remove(self.def_spacer, do_unlink=True)
+
+            # Create defect mask object
+            mesh = bpy.data.meshes.new(def_mesh_name)  # Create the mesh (inner data)
+            obj = bpy.data.objects.new(def_mesh_name, mesh)  # Create an object
+            obj.data.from_pydata(self.vertices, [], polygons_def)
+
+            bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
+            self.def_spacer = bpy.data.objects[def_mesh_name]
+            self.def_spacer.location = (0.0, 0.0, 0.0)
+            self.def_spacer.active_material = self.material
 
     def update_mesh_back_ground(self):
         """
@@ -102,43 +261,42 @@ class SpacerEnv(btb.env.BaseEnv):
         self.spacer.data.vertices.foreach_set("co", z_coordinates)
 
         # Update the mesh in Blender
-        self.spacer.data.update() # Updates the mesh in scene by refreshing the screen
+        self.spacer.data.update()  # Updates the mesh in scene by refreshing the screen
 
-    def get_sample_surface(self, with_defect=True):
-        filename = random.choice(self.topologies)
-        if filename.endswith('.pkl'):
-            with open(os.path.join(self.topology_dir, filename), 'rb') as f:
-                my_realisation = pickle.load(f) * 1e-6
-                grid_spacing, sample_surface = my_realisation[0][0], np.array(my_realisation[1:, :])
+        if not self.training:
+            self.get_defect_mask()
 
-                spacer = Spacer(sample_surface, grid_spacing)
-                if with_defect:
-                    ro, r1, theta0, defect_length, defect_type = \
-                        np.round(np.random.uniform(12.5, 15), 2), \
-                            np.round(np.random.uniform(13.8, 16), 2), \
-                            np.random.randint(1, 85), \
-                            np.round(np.random.uniform(0.1, 10), 2), \
-                            random.choice([0, 1])
-                    spacer.randomize_defect(ro, r1, theta0, 70, 40, defect_length, defect_type)
-                # spacer.randomize_defect(ro, r1, np.random.randint(92, 179), 70, 40, defect_length, 0)
-                # spacer.randomize_defect(ro, r1, np.random.randint(180, 240), 70, 40, defect_length, 0)
-                # spacer.randomize_defect(ro, r1, np.random.randint(240, 360), 70, 40, defect_length, 0)
-                f.close()
-                return spacer
+    def get_sample_surface(self, with_defect=True, return_statistics=False, No_of_Defect=5):
+        shared_matrix = multiprocessing.Array('i', self.grid_dim * self.grid_dim)
+        self.spacer_s = Spacer(shared_matrix, self.grid_spacing, self.outer_radius, self.thickness)
+        if with_defect:
+            # no of defects
+            subinterval = int(360 / No_of_Defect)
+            thetas = np.array([i * subinterval for i in range(No_of_Defect)])
+            r0s = np.round(np.random.uniform(12.5, 16, No_of_Defect), 2)
+            r1s = np.round(np.random.uniform(12.5, 16, No_of_Defect), 2)
+            sls = np.round(np.random.uniform(0.1, 10, No_of_Defect), 2)
+            pairs = np.random.randint(1, 5, size=No_of_Defect)
+            spaces = np.random.choice([0, 8, 16, 20, 24], size=No_of_Defect)
 
-    def reset_sample_surface(self, with_defect=True):
-        filename = 'points_6_dx22.182_0.pkl'  # points_5_dx18.485_0.pkl'
-        if filename.endswith('.pkl'):
-            with open(os.path.join(self.topology_dir, filename), 'rb') as f:
-                my_realisation = pickle.load(f) * 1e-6
-                grid_spacing, sample_surface = my_realisation[0][0], np.array(my_realisation[1:, :])
+            # Below code is to be used during debugging as multiprocessing cant be debugged
+            # generate_defect(surface=self.spacer_s.surface, grid_spacing=self.spacer_s.grid_spacing, r0=r0s[0],
+            #                 r1=r1s[0], scratch_length=sls[0], theta0=thetas[0], width=widths[0], space=spaces[0])
 
-                spacer = Spacer(sample_surface, grid_spacing)
-                if with_defect:
-                    ro, r1, theta0, defect_length, defect_type = 12.5, 13.8, 2, 3, 0
-                    spacer.randomize_defect(ro, r1, 70, 40, theta0, defect_length, defect_type)
-                f.close()
-                return spacer
+            processes = [multiprocessing.Process(target=generate_defect,
+                                                 args=(self.spacer_s.surface, self.spacer_s.grid_spacing, r0,
+                                                       r1, sl, theta, pair, space))
+                         for r0, r1, sl, theta, pair, space in zip(r0s, r1s, sls, thetas, pairs, spaces)]
+
+            for p in processes:
+                p.start()
+
+            # wait for all the processes to finish
+            for p in processes:
+                p.join()
+        self.spacer_s.surface[self.spacer_s.spacer_mask] = 1
+        if return_statistics:
+            return {'r0s': r0s, 'r1s': r1s, 'sls': sls, 'thetas': thetas, 'pairs': pairs, 'spaces': spaces}
 
     def inverse_normalization(self, action_range):
         # inverse actions from -1- 1 to respective range
@@ -149,17 +307,31 @@ class SpacerEnv(btb.env.BaseEnv):
 
         return action_inverse_normalized
 
+    def generate_spacer_assign_mat(self):
+        self.dfct_statics = self.get_sample_surface(with_defect=not self.training, return_statistics=not self.training)
+        self.spacer_s.get_spacer_point_co()
+        self.vertices = self.spacer_s.point_coo
+        self.generate_polygon()
+        if not self.training:
+            self.get_defect_mask()
+        self.update_scene()
+
     def _env_prepare_step(self, actions: np.ndarray):
         self.step += 1
         self.total_step += 1
-
         self.take_action(actions)
-        # spacer = self.get_sample_surface(with_defect=False)
-        # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
+        dfct_statics = self.get_sample_surface(with_defect=not self.training, return_statistics=not self.training)
+        if not self.training:
+            new_row = pd.DataFrame(dfct_statics, columns=self.df_stats.columns)
+            self.df_stat.append(new_row)
+        self.spacer_s.get_spacer_point_co()
+        self.vertices = self.spacer_s.point_coo
+        self.update_mesh_back_ground()
 
     def _env_reset(self):
         # global dummy_actions
         self.episodes += 1
+        self.total_step += 1
         self.step = 0
 
         # Generate random Gaussian noise
@@ -172,53 +344,55 @@ class SpacerEnv(btb.env.BaseEnv):
         clipped_action = {key: np.clip(action[i], self.action_bound[key][0],
                                        self.action_bound[key][1]) for i, key in enumerate(self.action_bound.keys())}
         self.reset_action = clipped_action
-        self.update_mat(self.reset_action['specular'], self.reset_action['ior'], self.reset_action['roughness'])
+        self.update_mat(0.5, 2.3, self.reset_action['roughness'])
         self.update_Mix(self.reset_action['Factor'])
-        self.update_lights(self.reset_action['value'], self.reset_action['energy0'],
-                           self.reset_action['Spread'], self.reset_action['ro_x'], self.reset_action['ro_y'])
+        self.update_lights(self.reset_action['energy0'], self.reset_action['ro_x'], self.reset_action['ro_y'])
 
-        self.update_clr_ramp(self.reset_action['Pos_black'], self.reset_action['Pos_white'])
+        file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/'.format(
+            self.g_time_stamp)
+        os.makedirs(file_path_full, exist_ok=True)
 
-        # spacer = self.reset_sample_surface(with_defect=False)
-        # self.update_mesh_back_ground(np.array(spacer.point_coo[['X', 'Y', 'Z']]))
-        self.total_step += 1
+        if not self.training:
+            df_stats = pd.concat(self.df_stat, ignore_index=True)
+            df_stats.to_csv(file_path_full + 'defect_statistics.csv', index=False)
+
         return self._env_post_step()
 
-    def _env_post_step(self):
+    def _env_post_step(self, save_blend_file=False):
         self.update_scene()
-
         # Setup default image rendering
         global r_
         cam = btb.Camera()
         off = btb.OffScreenRenderer(camera=cam, mode='rgb')
         file_path_full = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/full/{}'.format(
             self.g_time_stamp, self.episodes)
-        os.makedirs(file_path_full, exist_ok=True)
-        file_path = file_path_full + '/image{}_{}.png'.format(self.episodes, self.step)
+        img_file_path = file_path_full + '/image'
+        os.makedirs(img_file_path, exist_ok=True)
 
-        pil_img = off.render(file_path)
-        # pil_img.show()
+        self.spacer.hide_render = False
+        pil_img = off.render(img_file_path + '/image{}_{}.png'.format(self.episodes, self.total_step))
+
+        if not self.training:
+            mask_file_path = file_path_full + '/mask'
+            os.makedirs(mask_file_path, exist_ok=True)
+            self.spacer.hide_render = True
+            self.def_spacer.hide_render = False
+            off.render(mask_file_path + '/mask{}_{}.png'.format(self.episodes, self.total_step))
+
         gray_img = np.array(pil_img, dtype=np.uint8)
-        # ret, binary_img = cv2.threshold(gray_img, 1.0, 255, cv2.THRESH_BINARY)
-        # RM_BG_img = cv2.bitwise_and(gray_img, gray_img, mask=binary_img)
-        # blur_img = cv2.GaussianBlur(RM_BG_img, (3, 3), 0)
-        # obs = Image.fromarray(RM_BG_img)
-        # obs.show()
-        # obs = np.asarray(RM_BG_img, dtype=np.uint8)
 
-        # self.state = get_circular_corps(obs, step_angle=20, radius=850, address=self.file_path_croped + '/{}_{}_'
-        # .format(self.episodes, self.step))
         windows = view_as_windows(gray_img, (128, 128), step=64)
         result_windows = windows[self.y_128_64, self.x_128_64]
         self.state = Image.fromarray(np.hstack(result_windows))
 
-        if self.episodes % 60 == 0:
+        if self.total_step % 60 == 0:
             file_path_croped = '/home/mohanty/PycharmProjects/Data/spacer_data/synthetic_data2/temp{}/croped/{}'.format(
-                self.g_time_stamp, self.episodes)
+                self.g_time_stamp, self.total_step)
             os.makedirs(file_path_croped, exist_ok=True)
             self.state.save(file_path_croped + '/{}_{}_.png'.format(self.episodes, self.step))
         done, r_ = False, 0
-
+        if save_blend_file:
+            bpy.ops.wm.save_as_mainfile(filepath='/home/mohanty/Desktop/with_def{}.blend'.format(self.step))
         return dict(obs=self.state, reward=r_, done=done, action_pair=self.action_inverted)
 
     def take_action(self, actions):
@@ -229,22 +403,15 @@ class SpacerEnv(btb.env.BaseEnv):
         action_inverse_mix = self.inverse_normalization(self.action_mix)
         self.update_Mix(action_inverse_mix['Factor'])
 
-        actions_inverse_cmn_ligt = self.inverse_normalization(self.action_light_cmn)
-        actions_inverse_specifice_ligt = self.inverse_normalization(self.action_light)
-        self.update_lights(actions_inverse_cmn_ligt['value'], actions_inverse_specifice_ligt['energy0'],
-                           actions_inverse_specifice_ligt['Spread'], actions_inverse_specifice_ligt['ro_x'],
-                           actions_inverse_specifice_ligt['ro_y'])
+        actions_inverse_specific_ligt = self.inverse_normalization(self.action_light)
+        self.update_lights(actions_inverse_specific_ligt['energy0'], actions_inverse_specific_ligt['ro_x'],
+                           actions_inverse_specific_ligt['ro_y'])
 
-        actions_inverse_clr_ramp = self.inverse_normalization(self.action_clr_ramp)
-        self.update_clr_ramp(actions_inverse_clr_ramp['Pos_black'], actions_inverse_clr_ramp['Pos_white'])
-
-        self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_cmn_ligt,
-                                **actions_inverse_specifice_ligt, **actions_inverse_clr_ramp}
+        self.action_inverted = {**action_inverse_mat, **action_inverse_mix, **actions_inverse_specific_ligt}
 
         self.action_inverted = {key: round(value, 2) for key, value in self.action_inverted.items()}
 
         self.update_mapping()
-        self.update_spacer_orientation()
 
     def update_mat(self, specular, ior, roughness):
         mat = self.spacer.data.materials[0]
@@ -263,25 +430,15 @@ class SpacerEnv(btb.env.BaseEnv):
 
     def update_mapping(self):
         texture_node = self.texture_nodes['Mapping']
-        randomize = np.random.random_sample(3,)
+        randomize = np.random.random_sample(3, )
         texture_node.inputs['Rotation'].default_value = randomize
 
     def update_Mix(self, factor):
         texture_node = self.texture_nodes['Mix (Legacy)']
         texture_node.inputs['Fac'].default_value = factor
 
-    def update_lights(self, value, energy0, Spread, ro_x, ro_y):
-        #   set color
-        existing_rgb = self.light0.color[:3]
-        h, s, v = colorsys.rgb_to_hsv(*existing_rgb)
-        hsv_color = (h, s, value)
-        rgb_color = colorsys.hsv_to_rgb(*hsv_color)
-        dummy_alpha = tuple([1.0])
-        self.light0.color = rgb_color + dummy_alpha
-        #   set energy
+    def update_lights(self, energy0, ro_x, ro_y):
         self.light0.data.energy = energy0
-        self.light0.data.spread = Spread
-        #   set light angle
         self.light0.rotation_euler.x = ro_x
         self.light0.rotation_euler.y = ro_y
 
@@ -290,12 +447,6 @@ class SpacerEnv(btb.env.BaseEnv):
         color_ramp = color_ramp_node.color_ramp
         color_ramp.elements[0].position = Pos_black
         color_ramp.elements[1].position = Pos_white
-
-    def update_spacer_orientation(self):
-        # self.spacer.location.x = np.random.uniform(-0.0003, 0.0003)
-        # self.spacer.location.y = np.random.uniform(-0.0003, 0.0003)
-        # self.spacer.location.z = np.random.uniform(-0.0003, 0.0003)
-        self.spacer.rotation_euler.z = np.random.uniform(0, 3.14)
 
 
 def main():
