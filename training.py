@@ -146,15 +146,15 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten_img = self.cnn(torch.as_tensor(observation_space['0image'].sample()[None]).float()).shape[1]
-        # if self.scalar:
-        #     self.n_img = len(observation_space.spaces)
-        #     self.dropout0 = nn.Dropout(p=0.3)
-        #     self.linear0 = nn.Linear(n_flatten_img, 100)
-        #     self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
-        #     self.dropout1 = nn.Dropout(p=0.3)
-        #     self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
-        #
-        # else:
+            # if self.scalar:
+            #     self.n_img = len(observation_space.spaces)
+            #     self.dropout0 = nn.Dropout(p=0.3)
+            #     self.linear0 = nn.Linear(n_flatten_img, 100)
+            #     self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
+            #     self.dropout1 = nn.Dropout(p=0.3)
+            #     self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
+            #
+            # else:
             self.n_img = len(observation_space.spaces)
             self.linear0 = nn.Linear(n_flatten_img, 100)
             self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
@@ -214,9 +214,9 @@ class Penv(gym.Env):
         self.disc_fk_score = 0
         self.done = False
         self.x_128_64 = [12, 13, 14, 15, 16, 17, 18, 9, 10, 20, 21, 3, 27, 3, 27, 2, 28, 2, 28, 2, 28, 2, 28, 2, 28, 2,
-                    28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
+                         28, 2, 28, 3, 27, 3, 27, 9, 10, 20, 21, 12, 13, 14, 15, 16, 17, 18]
         self.y_128_64 = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 9, 9, 10, 10, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17,
-                    18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
+                         18, 18, 20, 20, 21, 21, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28]
 
         logging.basicConfig(filename=train_log, level=logging.INFO)  # logging must be done after environment generation
 
@@ -388,7 +388,7 @@ class Penv(gym.Env):
                     actual_spacer, fake_spacer, info = self.get_data(noisy_action)
                     fake_spacer = self.match_obs_space(fake_spacer)
 
-                    actual_spacer, fake_spacer = actual_spacer/255.0, fake_spacer / 255.0
+                    actual_spacer, fake_spacer = actual_spacer / 255.0, fake_spacer / 255.0
 
                     actual_spacer = to_device(actual_spacer, self.disc_device)
                     fake_spacer = to_device(torch.from_numpy(fake_spacer.copy()).unsqueeze(1).float(), self.disc_device)
@@ -569,9 +569,9 @@ def parse_arguments():
                         default='/home/mohanty/PycharmProjects/Data/spacer_data/train_centered_parent',
                         help='Full spacer images for discriminator training')
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
-    parser.add_argument('--batch_size', type=int, default=2, help='Batch size for PPO training')
-    parser.add_argument('--batches_in_episode', type=int, default=2, help='Episode length = batch_size * '
-                                                                          'batches_in_episode')
+    parser.add_argument('--batch_size', type=int, default=6, help='Batch size for PPO training')
+    parser.add_argument('--batches_in_episode', type=int, default=84, help='Episode length = batch_size * '
+                                                                           'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
     parser.add_argument('--n_epochs', type=int, default=20, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
@@ -580,8 +580,8 @@ def parse_arguments():
     parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
     parser.add_argument('--retrain_disc', type=bool, default=True, help='Discriminator training')
 
-    parser.add_argument('--lr_generator', type=float, default=0.0004, help='Learning rate for generator PPO')
-    parser.add_argument('--total_steps', type=int, default=5, help='Total steps for PPO to be trained')
+    parser.add_argument('--lr_generator', type=float, default=0.001, help='Learning rate for generator PPO')
+    parser.add_argument('--total_steps', type=int, default=48000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
     parser.add_argument('--blender_add', type=int, default=51, help='Blendtorch launcher address')
     parser.add_argument('--blend_file', type=str, default='spacer_musgrave_and_white_texture_mix.blend',
@@ -591,7 +591,6 @@ def parse_arguments():
 
 def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epochs, lr_discriminator, weight_decay,
          device_discriminator, retrain_disc, lr_generator, total_steps, device_generator, blender_add, blend_file):
-
     episode_length = batch_size * batches_in_episode
     print("batch_size:", batch_size, 'episode_length:', episode_length)
 
