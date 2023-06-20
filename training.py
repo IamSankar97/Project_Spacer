@@ -161,15 +161,24 @@ class CustomImageExtractor(BaseFeaturesExtractor):
             self.linear2 = nn.Linear(features_dim * 3, features_dim)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        img_features = []
-        for _, value in observations.items():
-            cnn_output = self.cnn(value)
-            linear0 = torch.relu(self.linear0(cnn_output))
-            img_features.append(linear0)
+        batch_size = len(observations)
+        img_tensor = torch.stack(list(observations.values()), dim=1).squeeze().unsqueeze(1)
+        cnn_output = self.cnn(img_tensor)
+        linear0 = torch.relu(self.linear0(cnn_output))
+        img_features = linear0.view(-1)
 
-        cnn_output = torch.cat(img_features, dim=1)
-        x = torch.relu(self.linear1(cnn_output))
+        x = torch.relu(self.linear1(img_features))
         out_features = torch.relu(self.linear2(x))
+
+        # img_features = []
+        # for _, value in observations.items():
+        #     cnn_output = self.cnn(value)
+        #     linear0 = torch.relu(self.linear0(cnn_output))
+        #     img_features.append(linear0)
+        #
+        # cnn_output = torch.cat(img_features, dim=1)
+        # x = torch.relu(self.linear1(cnn_output))
+        # out_features = torch.relu(self.linear2(x))
 
         return out_features
 
@@ -371,6 +380,7 @@ class Penv(gym.Env):
 
     def initialize_discriminator(self):
         if self.train_disc:
+            self.discriminator.train()
             ortho_actions = pd.DataFrame(get_orth_actions(self.action_space.shape[0]))
             noise_std, theta, dt = 0.12, 0.15, 1e-2
 
@@ -413,6 +423,8 @@ class Penv(gym.Env):
 
             torch.save(self.discriminator, os.path.join(CHECKPOINT_DIR,
                                                         'Resnet_disc_model_{}_{}.pth'.format('pretrain', self.epoch)))
+        else:
+            print("using Pretrained Discriminator")
 
     def get_state(self, fake_spacer, scalar=False):
         obs_imgs = np.expand_dims(fake_spacer, axis=-1)
@@ -492,6 +504,7 @@ class Penv(gym.Env):
 
         #   Collect Data's in lists if Discriminator is to be retrained.
         if self.done and self.train_disc:
+            self.discriminator.train()
             self.target_gen_loss = 1 * math.exp(-self.disc_train_epoch / 10)
 
             #   Discriminator Training
@@ -504,7 +517,7 @@ class Penv(gym.Env):
                 buffer_act_spacer = torch.stack(list(self.disc_buffer_act_spacer))
                 buffer_fake_spacer = torch.stack(list(self.disc_buffer_fake_spacer))
 
-                while not is_loss_stagnated(self.disc_ls_epoch, window_size=self.episode_length * 2,
+                while not is_loss_stagnated(self.disc_ls_epoch, window_size=50,
                                          threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
                     self.epoch += 1
                     indices0 = torch.randperm(buffer_act_spacer.size(1), device=self.disc_device)
@@ -571,17 +584,17 @@ def parse_arguments():
     parser.add_argument('--batches_in_episode', type=int, default=84, help='Episode length = batch_size * '
                                                                           'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
-    parser.add_argument('--n_epochs', type=int, default=20, help='total epochs the gathered experiences'
+    parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.0001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
-    parser.add_argument('--device_discriminator', type=int, default=1, help='Discriminator device')
-    parser.add_argument('--retrain_disc', type=bool, default=True, help='Discriminator training')
+    parser.add_argument('--device_discriminator', type=int, default=0, help='Discriminator device')
+    parser.add_argument('--retrain_disc', type=bool, default=False, help='Discriminator training')
 
-    parser.add_argument('--lr_generator', type=float, default=0.001, help='Learning rate for generator PPO')
+    parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=48000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=51, help='Blendtorch launcher address')
+    parser.add_argument('--blender_add', type=int, default=53, help='Blendtorch launcher address')
     parser.add_argument('--blend_file', type=str, default='spacer_musgrave_and_white_texture_mix.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
