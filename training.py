@@ -166,20 +166,8 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         cnn_output = self.cnn(img_tensor)
         linear0 = torch.relu(self.linear0(cnn_output))
         img_features = linear0.view(-1)
-
         x = torch.relu(self.linear1(img_features))
         out_features = torch.relu(self.linear2(x))
-
-        # img_features = []
-        # for _, value in observations.items():
-        #     cnn_output = self.cnn(value)
-        #     linear0 = torch.relu(self.linear0(cnn_output))
-        #     img_features.append(linear0)
-        #
-        # cnn_output = torch.cat(img_features, dim=1)
-        # x = torch.relu(self.linear1(cnn_output))
-        # out_features = torch.relu(self.linear2(x))
-
         return out_features
 
 
