@@ -106,7 +106,7 @@ def generate_defect(surface, grid_spacing, r0, r1, scratch_length, theta0, pair=
 class SpacerEnv(btb.env.BaseEnv):
     def __init__(self, agent):
         super().__init__(agent)
-        self.training = True    # If training true defect data and it's mask image is not generated.
+        self.rl_training_mode = True    # If training true defect data and it's mask image is not generated.
         # Sapcer Dimesnions
         self.outer_radius = 16 * 1e-3
         self.thickness = 3.222 * 1e-3
@@ -118,6 +118,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.camera.location = (0.0, 0.0, 0.15)
         self.light0 = bpy.data.objects["L0_top"]
         self.light0.location = (0.0, 0.0, 0.15)
+        self.background_material = bpy.data.materials.get("background_material")
+        self.defect_material = bpy.data.materials.get("spacer_material")
 
         self.episodes, self.step, self.total_step = -2, 0, 0
 
@@ -145,11 +147,11 @@ class SpacerEnv(btb.env.BaseEnv):
 
         self.state = None
         self.vertices = None
-        self.def_spacer = not self.training
+        self.def_spacer = not self.rl_training_mode
         self.action_inverted = None
         self.action_pair = None
 
-        self.generate_spacer_assign_mat()
+        self.get_spacer_assign_mat()
         self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
         self.df_stats = pd.DataFrame(columns=['r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
         self.df_stat = []
@@ -202,10 +204,8 @@ class SpacerEnv(btb.env.BaseEnv):
         self.spacer = bpy.data.objects[spacer_mesh_name]
         self.spacer.location = (0.0, 0.0, 0.0)
 
-        self.material = bpy.data.materials.get("spacer")
-
         # Assign the material to the object
-        self.spacer.active_material = self.material
+        self.spacer.active_material = self.background_material
         bpy.context.view_layer.objects.active = self.spacer
         self.spacer.select_set(True)
 
@@ -240,7 +240,7 @@ class SpacerEnv(btb.env.BaseEnv):
             bpy.context.scene.collection.objects.link(obj)  # Link the object to the scene
             self.def_spacer = bpy.data.objects[def_mesh_name]
             self.def_spacer.location = (0.0, 0.0, 0.0)
-            self.def_spacer.active_material = self.material
+            self.def_spacer.active_material = self.background_material
 
     def update_mesh_back_ground(self):
         """
@@ -253,9 +253,6 @@ class SpacerEnv(btb.env.BaseEnv):
 
         # Update the mesh in Blender
         self.spacer.data.update()  # Updates the mesh in scene by refreshing the screen
-
-        if not self.training:
-            self.get_defect_mask()
 
     def get_sample_surface(self, with_defect=True, return_statistics=False, No_of_Defect=5):
         shared_matrix = multiprocessing.Array('i', self.grid_dim * self.grid_dim)
@@ -298,13 +295,12 @@ class SpacerEnv(btb.env.BaseEnv):
 
         return action_inverse_normalized
 
-    def generate_spacer_assign_mat(self):
-        if self.training:
+    def get_spacer_assign_mat(self):
+        if self.rl_training_mode:
             self.spacer = bpy.data.objects['spacer_ring_train']
 
         else:
-            self.dfct_statics = self.get_sample_surface(with_defect=not self.training,
-                                                        return_statistics=not self.training)
+            self.dfct_statics = self.get_sample_surface(with_defect=True, return_statistics=True)
             self.spacer_s.get_spacer_point_co()
             self.vertices = self.spacer_s.point_coo
             self.generate_polygon()
@@ -316,10 +312,10 @@ class SpacerEnv(btb.env.BaseEnv):
         self.total_step += 1
         self.take_action(actions)
 
-        if not self.training:
-            dfct_statics = self.get_sample_surface(with_defect=not self.training, return_statistics=not self.training)
+        if not self.rl_training_mode:
+            defect_statics = self.get_sample_surface(with_defect=True, return_statistics=True)
 
-            new_row = pd.DataFrame(dfct_statics, columns=self.df_stats.columns)
+            new_row = pd.DataFrame(defect_statics, columns=self.df_stats.columns)
             self.df_stat.append(new_row)
             self.spacer_s.get_spacer_point_co()
             self.vertices = self.spacer_s.point_coo
@@ -349,7 +345,7 @@ class SpacerEnv(btb.env.BaseEnv):
             self.g_time_stamp)
         os.makedirs(file_path_full, exist_ok=True)
 
-        if not self.training:
+        if not self.rl_training_mode:
             df_stats = pd.concat(self.df_stat, ignore_index=True)
             df_stats.to_csv(file_path_full + 'defect_statistics.csv', index=False)
 
@@ -366,15 +362,38 @@ class SpacerEnv(btb.env.BaseEnv):
         img_file_path = file_path_full + '/image'
         os.makedirs(img_file_path, exist_ok=True)
 
-        self.spacer.hide_render = False
-        pil_img = off.render(img_file_path + '/image{}_{}.png'.format(self.episodes, self.total_step))
+        if self.rl_training_mode:
+            self.spacer.hide_render = False
+            pil_img = off.render(img_file_path + '/image{}_{}.png'.format(self.episodes, self.total_step))
 
-        if not self.training:
+        else:
             mask_file_path = file_path_full + '/mask'
             os.makedirs(mask_file_path, exist_ok=True)
+
+            self.def_spacer.hide_render = False
+            self.spacer.hide_render = False
+
+            self.def_spacer.active_material = self.defect_material
+            self.spacer.active_material = self.background_material
+            pil_img = off.render(img_file_path + '/image{}_{}_{}.png'.format(self.episodes, self.total_step,
+                                                                             self.grid_spacing))
+
             self.spacer.hide_render = True
             self.def_spacer.hide_render = False
-            off.render(mask_file_path + '/mask{}_{}.png'.format(self.episodes, self.total_step))
+
+            mat = self.def_spacer.data.materials[0]
+            if not mat.use_nodes:
+                mat.use_nodes = True
+
+            mat_nodes = mat.node_tree.nodes['Principled BSDF']
+            mat_nodes.inputs['Emission'].default_value = (1, 1, 1, 1)
+
+            mask_img = off.render(mask_file_path + '/mask{}_{}_{}.png'.
+                                  format(self.episodes, self.total_step, self.grid_spacing))
+            mat_nodes.inputs['Emission'].default_value = (0, 0, 0, 1)
+
+            self.def_spacer.hide_render = False
+            self.spacer.hide_render = False
 
         gray_img = np.array(pil_img, dtype=np.uint8)
 
