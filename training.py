@@ -161,7 +161,6 @@ class CustomImageExtractor(BaseFeaturesExtractor):
             self.linear2 = nn.Linear(features_dim * 3, features_dim)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        batch_size = len(observations)
         img_tensor = torch.stack(list(observations.values()), dim=1).squeeze().unsqueeze(1)
         cnn_output = self.cnn(img_tensor)
         linear0 = torch.relu(self.linear0(cnn_output))
