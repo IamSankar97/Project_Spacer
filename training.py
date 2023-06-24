@@ -139,6 +139,7 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
+        self.out_features_dim = features_dim
         n_input_channels = observation_space['0image'].shape[0]
         self.cnn = torch.nn.Sequential(*list(resnet.resnet18(n_input_channels, 2).children())[:-2]).extend(
             [torch.nn.Flatten()])
@@ -146,27 +147,21 @@ class CustomImageExtractor(BaseFeaturesExtractor):
         # Compute shape by doing one forward pass
         with torch.no_grad():
             n_flatten_img = self.cnn(torch.as_tensor(observation_space['0image'].sample()[None]).float()).shape[1]
-            # if self.scalar:
-            #     self.n_img = len(observation_space.spaces)
-            #     self.dropout0 = nn.Dropout(p=0.3)
-            #     self.linear0 = nn.Linear(n_flatten_img, 100)
-            #     self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
-            #     self.dropout1 = nn.Dropout(p=0.3)
-            #     self.linear2 = nn.Linear(features_dim * 3, features_dim - self.n_scalar)
-            #
-            # else:
             self.n_img = len(observation_space.spaces)
-            self.linear0 = nn.Linear(n_flatten_img, 100)
-            self.linear1 = nn.Linear(100 * self.n_img, features_dim * 3)
-            self.linear2 = nn.Linear(features_dim * 3, features_dim)
+            self.linear0 = nn.Linear(n_flatten_img, 50)
+            self.linear1 = nn.Linear(50 * self.n_img, features_dim)
+            # self.linear2 = nn.Linear(features_dim * 2, features_dim)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        img_tensor = torch.stack(list(observations.values()), dim=1).squeeze().unsqueeze(1)
+        img_tensor = torch.stack(list(observations.values()), dim=0)
+        img_tensor = img_tensor.permute(1, 0, 2, 3, 4)
+        sequence_length, batch_size, channels, height, width = img_tensor.size()
+        img_tensor = img_tensor.reshape(batch_size * sequence_length, channels, height, width)
         cnn_output = self.cnn(img_tensor)
         linear0 = torch.relu(self.linear0(cnn_output))
-        img_features = linear0.view(-1)
-        x = torch.relu(self.linear1(img_features))
-        out_features = torch.relu(self.linear2(x))
+        img_features = linear0.view(sequence_length, batch_size * 50)  # img_features.view(batch_size * sequence_length, 100)
+        out_features = torch.relu(self.linear1(img_features))
+        # out_features = torch.relu(self.linear2(x))
         return out_features
 
 
@@ -373,7 +368,7 @@ class Penv(gym.Env):
 
             self.disc_ls_epoch = [0]
             while not (is_loss_stagnated(self.disc_ls_epoch, window_size=10, threshold=1e-3) or
-                    np.mean(self.disc_ls) < self.target_disc_loss):
+                       np.mean(self.disc_ls) < self.target_disc_loss):
                 self.disc_fk_score, self.disc_rl_score, self.disc_ls = [], [], []
                 for _ in range(self.batch_size):  # episode_length = completing 1 epoch
                     #   Take action and collect observations
@@ -505,7 +500,7 @@ class Penv(gym.Env):
                 buffer_fake_spacer = torch.stack(list(self.disc_buffer_fake_spacer))
 
                 while not is_loss_stagnated(self.disc_ls_epoch, window_size=50,
-                                         threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
+                                            threshold=1e-6) or np.mean(self.disc_ls) < self.target_disc_loss:
                     self.epoch += 1
                     indices0 = torch.randperm(buffer_act_spacer.size(1), device=self.disc_device)
                     indices1 = torch.randperm(buffer_fake_spacer.size(1), device=self.disc_device)
@@ -569,9 +564,9 @@ def parse_arguments():
     parser.add_argument('--img_size', nargs='*', type=int, default=[128, 128], help='img_size of disc training')
     parser.add_argument('--batch_size', type=int, default=6, help='Batch size for PPO training')
     parser.add_argument('--batches_in_episode', type=int, default=84, help='Episode length = batch_size * '
-                                                                          'batches_in_episode')
+                                                                           'batches_in_episode')
     parser.add_argument('--loss_weight', type=int, default=1, help='weight to the l1_loss')
-    parser.add_argument('--n_epochs', type=int, default=40, help='total epochs the gathered experiences'
+    parser.add_argument('--n_epochs', type=int, default=20, help='total epochs the gathered experiences'
                                                                  'will be learned by policy')
     parser.add_argument('--lr_discriminator', type=float, default=0.0001, help='Learning rate for discriminator')
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay for discriminator optimizer')
@@ -581,7 +576,7 @@ def parse_arguments():
     parser.add_argument('--lr_generator', type=float, default=0.0001, help='Learning rate for generator PPO')
     parser.add_argument('--total_steps', type=int, default=48000, help='Total steps for PPO to be trained')
     parser.add_argument('--device_generator', type=int, default=1, help='Generator device')
-    parser.add_argument('--blender_add', type=int, default=53, help='Blendtorch launcher address')
+    parser.add_argument('--blender_add', type=int, default=51, help='Blendtorch launcher address')
     parser.add_argument('--blend_file', type=str, default='spacer_musgrave_and_white_texture_mix.blend',
                         help='blend_file aligned with code in spacer.blend.py')
     return parser.parse_args()
@@ -611,7 +606,7 @@ def main(data_dir, img_size, batch_size, batches_in_episode, loss_weight, n_epoc
                           lr_discriminator=lr_discriminator, weight_decay=weight_decay, device_discriminator=device_0,
                           train_discriminator=retrain_disc, blender_add=blender_add, blend_file=blend_file))
 
-    policy_kwargs = dict(net_arch=dict(pi=[200, 100, 100], vf=[200, 100, 100]),
+    policy_kwargs = dict(net_arch=dict(pi=[100, 50], vf=[100, 50]),
                          features_extractor_class=CustomImageExtractor)
 
     logging_callback = TrainAndLoggingCallback(check_freq=episode_length, save_path=CHECKPOINT_DIR)

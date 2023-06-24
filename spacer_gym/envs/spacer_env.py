@@ -9,12 +9,13 @@ sys.path.append('/home/mohanty/PycharmProjects/Project_Spacer/spacer_gym/envs/')
 
 
 class SpacerEnv(btt.env.OpenAIRemoteEnv):
-    def __init__(self, address, blend_file='spacer_musgrave_and_white_texture_mix.blend', render_every=1, real_time=False):
+    def __init__(self, address, blend_file='spacer_musgrave_and_white_texture_mix.blend',
+                 blend_script='spacer.blend.py', render_every=1, real_time=False):
         super().__init__(version="0.0.1")
         self.np_random = None
         self.launch(
             scene=Path(__file__).parent / blend_file,
-            script=Path(__file__).parent / "spacer.blend.py",
+            script=Path(__file__).parent / blend_script,
             real_time=real_time,
             render_every=render_every,
             address=address,

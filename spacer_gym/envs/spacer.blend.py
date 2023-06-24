@@ -152,7 +152,7 @@ class SpacerEnv(btb.env.BaseEnv):
         self.action_pair = None
 
         self.get_spacer_assign_mat()
-        self.texture_nodes = bpy.data.materials.get("spacer").node_tree.nodes
+        self.texture_nodes = bpy.data.materials.get("background_material").node_tree.nodes
         self.df_stats = pd.DataFrame(columns=['r0s', 'r1s', 'sls', 'thetas', 'pairs', 'spaces'])
         self.df_stat = []
 
@@ -305,7 +305,7 @@ class SpacerEnv(btb.env.BaseEnv):
             self.vertices = self.spacer_s.point_coo
             self.generate_polygon()
             self.get_defect_mask()
-        self.update_scene()
+        # self.update_scene()
 
     def _env_prepare_step(self, actions: np.ndarray):
         self.step += 1
